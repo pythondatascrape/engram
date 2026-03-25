@@ -1,0 +1,33 @@
+# Binary
+engram
+/bin/
+
+# Go
+*.exe
+*.test
+*.out
+vendor/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Config secrets
+*.key
+*.pem
+engram.yaml
+!engram.example.yaml
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Proto generated
+gen/
