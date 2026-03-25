@@ -1,0 +1,146 @@
+package server
+
+import (
+	"context"
+	"testing"
+
+	engramErrors "github.com/pythondatascrape/engram/internal/errors"
+	"github.com/pythondatascrape/engram/internal/identity/codebook"
+	"github.com/pythondatascrape/engram/internal/identity/serializer"
+	"github.com/pythondatascrape/engram/internal/provider"
+	"github.com/pythondatascrape/engram/internal/provider/pool"
+	"github.com/pythondatascrape/engram/internal/session"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+// fakeProvider is a Provider implementation that returns a fixed text response.
+type fakeProvider struct {
+	response string
+}
+
+func (f *fakeProvider) Name() string { return "fake" }
+
+func (f *fakeProvider) Send(_ context.Context, _ *provider.Request) (<-chan provider.Chunk, error) {
+	ch := make(chan provider.Chunk, 2)
+	ch <- provider.Chunk{Text: f.response, Index: 0, Done: false}
+	ch <- provider.Chunk{Text: "", Index: 1, Done: true}
+	close(ch)
+	return ch, nil
+}
+
+func (f *fakeProvider) Healthcheck(_ context.Context) error { return nil }
+
+func (f *fakeProvider) Capabilities() provider.Capabilities {
+	return provider.Capabilities{Models: []string{"fake-model"}}
+}
+
+func (f *fakeProvider) Close() error { return nil }
+
+const testCodebookYAML = `
+name: test
+version: 1
+dimensions:
+  - name: role
+    type: enum
+    required: true
+    values: [admin, user, guest]
+  - name: domain
+    type: enum
+    required: false
+    values: [fire, police, medical]
+`
+
+func newTestDeps(t *testing.T) (*session.Manager, *serializer.Serializer, *codebook.Codebook, *pool.Pool) {
+	t.Helper()
+
+	cb, err := codebook.Parse([]byte(testCodebookYAML))
+	require.NoError(t, err)
+
+	mgr := session.NewManager(session.ManagerConfig{MaxSessions: 100})
+	ser := serializer.New()
+
+	fakeFactory := func(_ string) (provider.Provider, error) {
+		return &fakeProvider{response: "hello from LLM"}, nil
+	}
+	p := pool.New(pool.Config{MaxConnections: 2}, fakeFactory)
+
+	return mgr, ser, cb, p
+}
+
+func TestHandleRequest_FirstRequest_CreatesSession(t *testing.T) {
+	mgr, ser, cb, p := newTestDeps(t)
+	h := NewHandler(mgr, ser, cb, p)
+
+	req := IncomingRequest{
+		ClientID: "client-1",
+		APIKey:   "key-abc",
+		Query:    "What is fire code Section 4.2?",
+		Identity: map[string]string{"role": "admin", "domain": "fire"},
+		Opts:     session.Opts{Provider: "fake", Model: "fake-model"},
+	}
+
+	resp, err := h.HandleRequest(context.Background(), req)
+	require.NoError(t, err)
+	assert.NotEmpty(t, resp.SessionID)
+	assert.Equal(t, "hello from LLM", resp.FullText)
+	assert.Greater(t, resp.TotalTokens, 0)
+
+	// Session should now exist in the manager with identity stored.
+	sess, err := mgr.Get(resp.SessionID)
+	require.NoError(t, err)
+	assert.Equal(t, "client-1", sess.ClientID)
+	assert.Contains(t, sess.SerializedIdentity, "role=admin")
+	assert.Equal(t, 1, sess.Turns)
+}
+
+func TestHandleRequest_SubsequentRequest_UsesExistingSession(t *testing.T) {
+	mgr, ser, cb, p := newTestDeps(t)
+	h := NewHandler(mgr, ser, cb, p)
+
+	// First request — establish the session.
+	first := IncomingRequest{
+		ClientID: "client-2",
+		APIKey:   "key-abc",
+		Query:    "Initial query",
+		Identity: map[string]string{"role": "user"},
+		Opts:     session.Opts{Provider: "fake", Model: "fake-model"},
+	}
+	resp1, err := h.HandleRequest(context.Background(), first)
+	require.NoError(t, err)
+	require.NotEmpty(t, resp1.SessionID)
+
+	// Second request — reuse the session ID, no identity needed.
+	second := IncomingRequest{
+		ClientID:  "client-2",
+		APIKey:    "key-abc",
+		SessionID: resp1.SessionID,
+		Query:     "Follow-up query",
+		Opts:      session.Opts{Provider: "fake", Model: "fake-model"},
+	}
+	resp2, err := h.HandleRequest(context.Background(), second)
+	require.NoError(t, err)
+	assert.Equal(t, resp1.SessionID, resp2.SessionID)
+	assert.Equal(t, "hello from LLM", resp2.FullText)
+
+	// Session should record 2 turns.
+	sess, err := mgr.Get(resp1.SessionID)
+	require.NoError(t, err)
+	assert.Equal(t, 2, sess.Turns)
+}
+
+func TestHandleRequest_FirstRequest_NoIdentity_ReturnsError(t *testing.T) {
+	mgr, ser, cb, p := newTestDeps(t)
+	h := NewHandler(mgr, ser, cb, p)
+
+	req := IncomingRequest{
+		ClientID: "client-3",
+		APIKey:   "key-abc",
+		Query:    "Will this work?",
+		// Identity intentionally omitted.
+	}
+
+	_, err := h.HandleRequest(context.Background(), req)
+	require.Error(t, err)
+	assert.Equal(t, engramErrors.IDENTITY_REQUIRED, err)
+}
