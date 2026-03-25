@@ -10,18 +10,33 @@ import (
 	"github.com/pythondatascrape/engram/internal/identity/serializer"
 )
 
-// newTestCodebook builds a codebook with known fields for testing.
-func newTestCodebook() *codebook.Codebook {
-	cb, _ := codebook.Parse(nil)
-	cb.AddField(codebook.Field{Name: "domain", Type: "enum", Values: []string{"fire", "police", "ems"}})
-	cb.AddField(codebook.Field{Name: "rank", Type: "enum", Values: []string{"captain", "lieutenant", "sergeant"}})
-	cb.AddField(codebook.Field{Name: "experience", Type: "string"})
+func testCodebook(t *testing.T) *codebook.Codebook {
+	t.Helper()
+	cb, err := codebook.Parse([]byte(`
+name: test
+version: 1
+dimensions:
+  - name: domain
+    type: enum
+    required: true
+    values: [fire, police, ems]
+  - name: rank
+    type: enum
+    required: false
+    values: [captain, lieutenant, sergeant]
+  - name: experience
+    type: range
+    required: false
+    min: 0
+    max: 40
+`))
+	require.NoError(t, err)
 	return cb
 }
 
 func TestSerialize_Success(t *testing.T) {
 	s := serializer.New()
-	cb := newTestCodebook()
+	cb := testCodebook(t)
 
 	identity := map[string]string{
 		"domain":     "fire",
@@ -36,10 +51,10 @@ func TestSerialize_Success(t *testing.T) {
 
 func TestSerialize_ValidationError(t *testing.T) {
 	s := serializer.New()
-	cb := newTestCodebook()
+	cb := testCodebook(t)
 
 	identity := map[string]string{
-		"domain": "invalid_domain", // not a valid enum value
+		"domain": "invalid_domain",
 		"rank":   "captain",
 	}
 
@@ -50,7 +65,7 @@ func TestSerialize_ValidationError(t *testing.T) {
 
 func TestSerialize_Deterministic(t *testing.T) {
 	s := serializer.New()
-	cb := newTestCodebook()
+	cb := testCodebook(t)
 
 	identity := map[string]string{
 		"domain":     "fire",
@@ -63,5 +78,5 @@ func TestSerialize_Deterministic(t *testing.T) {
 
 	require.NoError(t, err1)
 	require.NoError(t, err2)
-	assert.Equal(t, result1, result2, "output must be deterministic across calls")
+	assert.Equal(t, result1, result2)
 }
