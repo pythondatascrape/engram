@@ -1,11 +1,9 @@
 // Package errors defines structured error types for the Engram server.
-// Every public function and handler returns *Detail instead of plain errors
-// so callers can inspect code, category, and retryability without string parsing.
 package errors
 
 import "fmt"
 
-// Detail is the canonical error type for Engram. It implements the error interface.
+// Detail is the canonical error type for Engram.
 type Detail struct {
 	Code         int
 	Category     string
@@ -14,7 +12,6 @@ type Detail struct {
 	RetryAfterMs int
 }
 
-// Error implements the error interface.
 func (d *Detail) Error() string {
 	return fmt.Sprintf("[%d %s] %s", d.Code, d.Category, d.Message)
 }
@@ -30,14 +27,14 @@ func New(code int, category, message string, retryable bool, retryAfterMs int) *
 	}
 }
 
-// WithRetryAfter returns a copy of the error with RetryAfterMs set to ms.
+// WithRetryAfter returns a copy with RetryAfterMs set.
 func (d *Detail) WithRetryAfter(ms int) *Detail {
 	copy := *d
 	copy.RetryAfterMs = ms
 	return &copy
 }
 
-// WithMessage returns a copy of the error with Message replaced by msg.
+// WithMessage returns a copy with Message replaced.
 func (d *Detail) WithMessage(msg string) *Detail {
 	copy := *d
 	copy.Message = msg
