@@ -55,6 +55,13 @@ func newSession(clientID string, opts Opts) *Session {
 	}
 }
 
+// SetIdentity stores a serialized identity blob on the session.
+func (s *Session) SetIdentity(serialized string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.SerializedIdentity = serialized
+}
+
 // Touch updates LastActivity to now.
 func (s *Session) Touch() {
 	s.mu.Lock()
