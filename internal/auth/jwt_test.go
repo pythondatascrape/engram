@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/pythondatascrape/engram/internal/auth"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func generateKeys(t *testing.T) (ed25519.PrivateKey, ed25519.PublicKey) {
@@ -176,4 +178,46 @@ func TestValidateEmptyToken(t *testing.T) {
 	if err == nil {
 		t.Fatal("Validate() should return error for empty token")
 	}
+}
+
+func TestIssueAndValidateWithIssuerAudience(t *testing.T) {
+	priv, pub := generateKeys(t)
+	issuer := auth.NewJWTIssuerWithIdentity(priv, pub, 5*time.Minute, "engram-prod", "api.engram.io")
+
+	token, err := issuer.Issue("client-123", nil)
+	require.NoError(t, err)
+
+	claims, err := issuer.Validate(token)
+	require.NoError(t, err)
+	assert.Equal(t, "engram-prod", claims.Issuer)
+	assert.Equal(t, "api.engram.io", claims.Audience)
+}
+
+func TestValidateRejectsWrongIssuer(t *testing.T) {
+	priv, pub := generateKeys(t)
+	issuerA := auth.NewJWTIssuerWithIdentity(priv, pub, 5*time.Minute, "staging", "api.engram.io")
+	issuerB := auth.NewJWTIssuerWithIdentity(priv, pub, 5*time.Minute, "production", "api.engram.io")
+
+	token, err := issuerA.Issue("client-123", nil)
+	require.NoError(t, err)
+
+	_, err = issuerB.Validate(token)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "issuer mismatch")
+}
+
+func TestValidateWithRevocationCheck(t *testing.T) {
+	priv, pub := generateKeys(t)
+	revokedTokens := map[string]bool{}
+	issuer := auth.NewJWTIssuer(priv, pub, 5*time.Minute)
+	issuer.SetRevocationCheck(func(claims *auth.Claims) bool {
+		return revokedTokens[claims.ClientID]
+	})
+	token, _ := issuer.Issue("client-revoked", nil)
+	_, err := issuer.Validate(token)
+	require.NoError(t, err)
+	revokedTokens["client-revoked"] = true
+	_, err = issuer.Validate(token)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "revoked")
 }
