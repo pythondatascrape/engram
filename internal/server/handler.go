@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	engramErrors "github.com/pythondatascrape/engram/internal/errors"
@@ -28,6 +29,11 @@ type Response struct {
 	FullText    string
 	TotalTokens int
 }
+
+const (
+	maxQueryBytes    = 32 * 1024 // 32 KB
+	maxIdentityBytes = 4 * 1024  // 4 KB total across all k/v pairs
+)
 
 // Handler orchestrates identity serialization, session management, prompt
 // assembly, and LLM provider calls for a single request.
@@ -56,6 +62,19 @@ func NewHandler(
 // HandleRequest processes one client turn: resolve/create session, assemble
 // prompt, call the LLM provider, and record the turn.
 func (h *Handler) HandleRequest(ctx context.Context, req IncomingRequest) (Response, error) {
+	if len(req.Query) > maxQueryBytes {
+		return Response{}, fmt.Errorf("query exceeds maximum size of %d bytes", maxQueryBytes)
+	}
+	if req.Identity != nil {
+		total := 0
+		for k, v := range req.Identity {
+			total += len(k) + len(v)
+		}
+		if total > maxIdentityBytes {
+			return Response{}, fmt.Errorf("identity exceeds maximum size of %d bytes", maxIdentityBytes)
+		}
+	}
+
 	var sess *session.Session
 
 	if req.SessionID == "" {
