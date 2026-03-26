@@ -25,7 +25,15 @@ func (s *Serializer) Serialize(cb *codebook.Codebook, identity map[string]string
 		return "", fmt.Errorf("identity validation failed: %w", err)
 	}
 
-	keys := make([]string, 0, len(identity))
+	// Use a stack-allocated array for identity maps with ≤8 keys (covers
+	// all practical codebook sizes). Falls back to heap for larger maps.
+	var keysBuf [8]string
+	var keys []string
+	if len(identity) <= len(keysBuf) {
+		keys = keysBuf[:0]
+	} else {
+		keys = make([]string, 0, len(identity))
+	}
 	for k := range identity {
 		keys = append(keys, k)
 	}
