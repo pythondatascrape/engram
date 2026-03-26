@@ -4,6 +4,7 @@ package codebook
 import (
 	"fmt"
 	"regexp"
+	"slices"
 	"strconv"
 
 	"gopkg.in/yaml.v3"
@@ -131,7 +132,7 @@ func (cb *Codebook) Validate(identity map[string]string) error {
 
 		switch d.Type {
 		case DimEnum:
-			if !contains(d.Values, val) {
+			if !slices.Contains(d.Values, val) {
 				return fmt.Errorf("dimension %q: value %q is not one of %v", d.Name, val, d.Values)
 			}
 		case DimRange, DimScale:
@@ -152,11 +153,3 @@ func (cb *Codebook) Validate(identity map[string]string) error {
 	return nil
 }
 
-func contains(slice []string, s string) bool {
-	for _, v := range slice {
-		if v == s {
-			return true
-		}
-	}
-	return false
-}
