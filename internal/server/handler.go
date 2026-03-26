@@ -3,7 +3,6 @@ package server
 import (
 	"context"
 	"strings"
-	"unicode/utf8"
 
 	engramErrors "github.com/pythondatascrape/engram/internal/errors"
 	"github.com/pythondatascrape/engram/internal/identity/codebook"
@@ -140,7 +139,7 @@ func (h *Handler) HandleRequest(ctx context.Context, req IncomingRequest) (Respo
 	// Record the turn; token counts are not available from all providers,
 	// so we pass 0 for tokensSaved and use the prompt length as a rough proxy
 	// for tokensSent when a real count is unavailable.
-	tokensSent := utf8.RuneCountInString(prompt)
+	tokensSent := len(prompt)
 	if err := h.sessions.RecordTurn(snap.ID, tokensSent, 0); err != nil {
 		return Response{}, err
 	}
