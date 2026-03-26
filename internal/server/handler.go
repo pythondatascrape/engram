@@ -139,9 +139,7 @@ func (h *Handler) HandleRequest(ctx context.Context, req IncomingRequest) (Respo
 	// so we pass 0 for tokensSaved and use the prompt length as a rough proxy
 	// for tokensSent when a real count is unavailable.
 	tokensSent := len(prompt)
-	if err := h.sessions.RecordTurn(snap.ID, tokensSent, 0); err != nil {
-		return Response{}, err
-	}
+	sess.RecordTurn(tokensSent, 0)
 
 	return Response{
 		SessionID:   snap.ID,

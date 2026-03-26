@@ -83,6 +83,16 @@ func (s *Session) SetIdentity(serialized string) {
 	s.SerializedIdentity = serialized
 }
 
+// RecordTurn increments the turn counter and accumulates token counts directly.
+func (s *Session) RecordTurn(tokensSent, tokensSaved int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.Turns++
+	s.TokensSent += tokensSent
+	s.TokensSaved += tokensSaved
+	s.LastActivity = time.Now()
+}
+
 // Touch updates LastActivity to now.
 func (s *Session) Touch() {
 	s.mu.Lock()
