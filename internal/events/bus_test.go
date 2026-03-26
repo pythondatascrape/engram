@@ -1,6 +1,8 @@
 package events_test
 
 import (
+	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -112,6 +114,28 @@ func TestResubscribe(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for event on new channel")
 	}
+}
+
+func TestBroadcastDuringUnsubscribe_NoPanic(t *testing.T) {
+	bus := events.NewBus()
+	for i := 0; i < 100; i++ {
+		bus.Subscribe(fmt.Sprintf("client-%d", i), nil)
+	}
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 1000; i++ {
+			bus.Broadcast(makeEvent("test.event"))
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 100; i++ {
+			bus.Unsubscribe(fmt.Sprintf("client-%d", i))
+		}
+	}()
+	wg.Wait()
 }
 
 func TestBroadcast(t *testing.T) {
