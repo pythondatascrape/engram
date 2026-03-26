@@ -2,7 +2,8 @@
 package session
 
 import (
-	"math/rand/v2"
+	"crypto/rand"
+	"encoding/hex"
 	"sync"
 	"time"
 )
@@ -41,24 +42,13 @@ type Session struct {
 	IdentityTokens     int
 }
 
-const hexDigits = "0123456789abcdef"
-
-// generateID produces a 32-char hex session identifier using math/rand/v2.
+// generateID produces a 32-char hex session identifier using crypto/rand.
 func generateID() string {
-	hi := rand.Uint64()
-	lo := rand.Uint64()
-	buf := make([]byte, 32)
-	for i := 0; i < 8; i++ {
-		b := byte(hi >> (56 - uint(i)*8))
-		buf[i*2] = hexDigits[b>>4]
-		buf[i*2+1] = hexDigits[b&0x0f]
+	var buf [16]byte
+	if _, err := rand.Read(buf[:]); err != nil {
+		panic("crypto/rand failed: " + err.Error())
 	}
-	for i := 0; i < 8; i++ {
-		b := byte(lo >> (56 - uint(i)*8))
-		buf[16+i*2] = hexDigits[b>>4]
-		buf[16+i*2+1] = hexDigits[b&0x0f]
-	}
-	return string(buf)
+	return hex.EncodeToString(buf[:])
 }
 
 // newSession constructs a new active session with a generated ID.
