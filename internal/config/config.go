@@ -11,10 +11,6 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// ---------------------------------------------------------------------------
-// Top-level
-// ---------------------------------------------------------------------------
-
 // Config is the root configuration object threaded through all components.
 type Config struct {
 	Server    ServerConfig    `yaml:"server"`
@@ -29,10 +25,6 @@ type Config struct {
 	Shutdown  ShutdownConfig  `yaml:"shutdown"`
 	Logging   LoggingConfig   `yaml:"logging"`
 }
-
-// ---------------------------------------------------------------------------
-// Sub-structs
-// ---------------------------------------------------------------------------
 
 type TLSConfig struct {
 	Enabled  bool   `yaml:"enabled"`
@@ -160,10 +152,6 @@ type LoggingConfig struct {
 	RedactQueries  bool   `yaml:"redact_queries"`
 }
 
-// ---------------------------------------------------------------------------
-// Public API
-// ---------------------------------------------------------------------------
-
 // Load reads the YAML file at path, applies defaults, applies env overrides,
 // and validates the result.
 func Load(path string) (*Config, error) {
@@ -218,10 +206,6 @@ func ParseSize(s string) (int64, error) {
 
 	return 0, fmt.Errorf("config: unrecognized size format %q (expected B/KB/MB/GB suffix)", s)
 }
-
-// ---------------------------------------------------------------------------
-// Internal helpers
-// ---------------------------------------------------------------------------
 
 func defaults() *Config {
 	return &Config{
