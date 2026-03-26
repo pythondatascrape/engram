@@ -172,6 +172,23 @@ func TestFactoryError(t *testing.T) {
 	}
 }
 
+// TestPoolKeyIsHashed verifies that the map key stored in the pool is a hash,
+// not the raw API key, so plaintext keys do not appear in heap dumps.
+func TestPoolKeyIsHashed(t *testing.T) {
+	p := pool.New(pool.Config{MaxConnections: 2}, factory)
+	_, err := p.Get(context.Background(), "sk-secret-key-12345")
+	if err != nil {
+		t.Fatalf("Get failed: %v", err)
+	}
+	stats := p.AllStats()
+	if len(stats) != 1 {
+		t.Fatalf("expected 1 sub-pool, got %d", len(stats))
+	}
+	if stats[0].Key == "sk-secret-key-12345" {
+		t.Error("pool map key should be a hash, not the raw API key")
+	}
+}
+
 // TestReturnNilConn verifies Return gracefully handles nil.
 func TestReturnNilConn(t *testing.T) {
 	p := pool.New(pool.Config{MaxConnections: 1}, factory)
