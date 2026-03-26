@@ -209,3 +209,46 @@ func TestValidate_InvalidBooleanValue(t *testing.T) {
 	err = cb.Validate(identity)
 	assert.ErrorContains(t, err, "active")
 }
+
+func TestParseWithLimits_InvalidYAML(t *testing.T) {
+	_, err := codebook.ParseWithLimits([]byte(`{{{not yaml`), 50, 20)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "yaml parse error")
+}
+
+func TestParseWithLimits_EnumValuesExceedLimit(t *testing.T) {
+	yml := `
+name: test
+version: 1
+dimensions:
+  - name: color
+    type: enum
+    required: false
+    values: [red, green, blue, yellow, cyan]
+`
+	_, err := codebook.ParseWithLimits([]byte(yml), 50, 2)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "exceeds limit")
+}
+
+func TestValidate_RangeValueNotANumber(t *testing.T) {
+	yml := `
+name: test
+version: 1
+dimensions:
+  - name: score
+    type: range
+    required: true
+    min: 0
+    max: 100
+`
+	cb, err := codebook.Parse([]byte(yml))
+	require.NoError(t, err)
+
+	identity := map[string]string{
+		"score": "not-a-number",
+	}
+	err = cb.Validate(identity)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "not a number")
+}
