@@ -147,3 +147,90 @@ func TestAllStats(t *testing.T) {
 		t.Errorf("after return: Active=%d Available=%d", stats[0].Active, stats[0].Available)
 	}
 }
+
+// TestFactoryError verifies that a factory failure is propagated and
+// the active count is rolled back.
+func TestFactoryError(t *testing.T) {
+	failFactory := func(_ string) (provider.Provider, error) {
+		return nil, context.DeadlineExceeded
+	}
+	p := pool.New(pool.Config{MaxConnections: 2}, failFactory)
+
+	_, err := p.Get(context.Background(), "key-err")
+	if err == nil {
+		t.Fatal("expected error from broken factory")
+	}
+
+	// After a failed factory call, the pool should still be usable.
+	// Switch to a working factory by creating a new pool to verify isolation.
+	stats := p.AllStats()
+	if len(stats) != 1 {
+		t.Fatalf("expected 1 sub-pool, got %d", len(stats))
+	}
+	if stats[0].Active != 0 {
+		t.Errorf("expected Active=0 after factory error, got %d", stats[0].Active)
+	}
+}
+
+// TestReturnNilConn verifies Return gracefully handles nil.
+func TestReturnNilConn(t *testing.T) {
+	p := pool.New(pool.Config{MaxConnections: 1}, factory)
+	// Should not panic.
+	p.Return(nil)
+}
+
+// TestDefaultMaxConnections verifies the zero-value config defaults to 1.
+func TestDefaultMaxConnections(t *testing.T) {
+	p := pool.New(pool.Config{MaxConnections: 0}, factory)
+
+	conn, err := p.Get(context.Background(), "key-default")
+	if err != nil {
+		t.Fatalf("Get failed: %v", err)
+	}
+
+	// Pool should only allow 1 connection.
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	_, err = p.Get(ctx, "key-default")
+	if err == nil {
+		t.Fatal("expected error: pool should default to MaxConnections=1")
+	}
+	p.Return(conn)
+}
+
+// TestWaiterNotification verifies that a blocked Get is woken when a
+// connection is returned.
+func TestWaiterNotification(t *testing.T) {
+	p := pool.New(pool.Config{MaxConnections: 1}, factory)
+
+	conn, err := p.Get(context.Background(), "key-wait")
+	if err != nil {
+		t.Fatalf("first Get failed: %v", err)
+	}
+
+	got := make(chan *pool.Conn, 1)
+	go func() {
+		c, err := p.Get(context.Background(), "key-wait")
+		if err != nil {
+			t.Errorf("second Get failed: %v", err)
+			return
+		}
+		got <- c
+	}()
+
+	// Give the goroutine a moment to register as a waiter.
+	time.Sleep(20 * time.Millisecond)
+
+	// Returning the connection should unblock the waiter.
+	p.Return(conn)
+
+	select {
+	case c := <-got:
+		if c == nil {
+			t.Fatal("expected non-nil conn from waiter")
+		}
+		p.Return(c)
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for blocked Get to complete")
+	}
+}
