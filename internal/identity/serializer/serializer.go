@@ -31,10 +31,22 @@ func (s *Serializer) Serialize(cb *codebook.Codebook, identity map[string]string
 	}
 	sort.Strings(keys)
 
-	pairs := make([]string, 0, len(keys))
+	// Estimate total size: sum of key + "=" + value + " " separator for each pair.
+	size := 0
 	for _, k := range keys {
-		pairs = append(pairs, k+"="+identity[k])
+		size += len(k) + 1 + len(identity[k]) + 1 // key + "=" + value + " "
 	}
 
-	return strings.Join(pairs, " "), nil
+	var b strings.Builder
+	b.Grow(size)
+	for i, k := range keys {
+		if i > 0 {
+			b.WriteByte(' ')
+		}
+		b.WriteString(k)
+		b.WriteByte('=')
+		b.WriteString(identity[k])
+	}
+
+	return b.String(), nil
 }
