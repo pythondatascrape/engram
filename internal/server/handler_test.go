@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	engramErrors "github.com/pythondatascrape/engram/internal/errors"
@@ -239,6 +240,48 @@ func TestHandleRequest_IdentityInjectionBlocked(t *testing.T) {
 	_, err := h.HandleRequest(context.Background(), req)
 	require.Error(t, err)
 	assert.Equal(t, engramErrors.INJECTION_DETECTED, err)
+}
+
+type hugeProvider struct{}
+
+func (h *hugeProvider) Name() string { return "huge" }
+func (h *hugeProvider) Send(_ context.Context, _ *provider.Request) (<-chan provider.Chunk, error) {
+	ch := make(chan provider.Chunk, 100)
+	go func() {
+		defer close(ch)
+		chunk := strings.Repeat("A", 1024)
+		for i := 0; i < 2048; i++ {
+			ch <- provider.Chunk{Text: chunk, Index: i}
+		}
+		ch <- provider.Chunk{Done: true}
+	}()
+	return ch, nil
+}
+func (h *hugeProvider) Healthcheck(_ context.Context) error { return nil }
+func (h *hugeProvider) Capabilities() provider.Capabilities { return provider.Capabilities{} }
+func (h *hugeProvider) Close() error                        { return nil }
+
+func TestHandleRequest_ResponseSizeCapped(t *testing.T) {
+	cb, err := codebook.Parse([]byte(testCodebookYAML))
+	require.NoError(t, err)
+	mgr := session.NewManager(session.ManagerConfig{MaxSessions: 100})
+	ser := serializer.New()
+	hugeFactory := func(_ string) (provider.Provider, error) {
+		return &hugeProvider{}, nil
+	}
+	p := pool.New(pool.Config{MaxConnections: 2}, hugeFactory)
+	h := NewHandler(mgr, ser, cb, p)
+
+	req := IncomingRequest{
+		ClientID: "client-huge", APIKey: "key-abc",
+		Query:    "Generate a lot",
+		Identity: map[string]string{"role": "user"},
+		Opts:     session.Opts{Provider: "huge", Model: "huge-model"},
+	}
+
+	resp, err := h.HandleRequest(context.Background(), req)
+	require.NoError(t, err)
+	assert.LessOrEqual(t, len(resp.FullText), maxResponseBytes+1024)
 }
 
 func TestHandleRequest_SessionLimitExceeded(t *testing.T) {

@@ -33,8 +33,9 @@ type Response struct {
 }
 
 const (
-	maxQueryBytes    = 32 * 1024 // 32 KB
-	maxIdentityBytes = 4 * 1024  // 4 KB total across all k/v pairs
+	maxQueryBytes    = 32 * 1024   // 32 KB
+	maxIdentityBytes = 4 * 1024    // 4 KB total across all k/v pairs
+	maxResponseBytes = 1024 * 1024 // 1 MB
 )
 
 // Handler orchestrates identity serialization, session management, prompt
@@ -161,10 +162,14 @@ func (h *Handler) HandleRequest(ctx context.Context, req IncomingRequest) (Respo
 
 	var sb strings.Builder
 	for chunk := range chunks {
-		sb.WriteString(chunk.Text)
 		if chunk.Done {
 			break
 		}
+		if sb.Len()+len(chunk.Text) > maxResponseBytes {
+			sb.WriteString(chunk.Text[:maxResponseBytes-sb.Len()])
+			break
+		}
+		sb.WriteString(chunk.Text)
 	}
 	fullText := sb.String()
 
