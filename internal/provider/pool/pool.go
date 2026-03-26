@@ -3,6 +3,8 @@ package pool
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"sync"
 
@@ -56,6 +58,12 @@ func New(cfg Config, factory Factory) *Pool {
 		cfg:     cfg,
 		factory: factory,
 	}
+}
+
+// hashKey returns a hex-encoded truncated SHA-256 of apiKey for safe map indexing.
+func hashKey(apiKey string) string {
+	h := sha256.Sum256([]byte(apiKey))
+	return hex.EncodeToString(h[:16])
 }
 
 // getOrCreateSubPool returns the sub-pool for key, creating if needed. Caller must hold p.mu.
