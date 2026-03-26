@@ -59,28 +59,20 @@ func (h *Handler) HandleRequest(ctx context.Context, req IncomingRequest) (Respo
 	var sess *session.Session
 
 	if req.SessionID == "" {
-		// First request — identity is mandatory.
 		if len(req.Identity) == 0 {
 			return Response{}, engramErrors.IDENTITY_REQUIRED
 		}
-
-		// Create a new session.
 		s, err := h.sessions.Create(ctx, req.ClientID, req.Opts)
 		if err != nil {
 			return Response{}, err
 		}
-
-		// Serialize and store the identity directly on the session
-		// (avoids redundant map lookup through the manager).
 		serialized, err := h.serializer.Serialize(h.codebook, req.Identity)
 		if err != nil {
 			return Response{}, err
 		}
 		s.SetIdentity(serialized)
-
 		sess = s
 	} else {
-		// Subsequent request — look up and verify ownership.
 		s, err := h.sessions.Get(req.SessionID)
 		if err != nil {
 			return Response{}, err
@@ -91,22 +83,17 @@ func (h *Handler) HandleRequest(ctx context.Context, req IncomingRequest) (Respo
 		sess = s
 	}
 
-	// Get only the fields needed for this request.
 	rctx := sess.RequestCtx()
-
-	// Assemble the structured prompt.
 	prompt := AssemblePrompt(PromptParts{
 		Identity: rctx.SerializedIdentity,
 		Query:    req.Query,
 	})
 
-	// Acquire a provider connection.
 	conn, err := h.pool.Get(ctx, req.APIKey)
 	if err != nil {
 		return Response{}, err
 	}
 
-	// Send to the LLM and collect streaming chunks.
 	chunks, err := conn.Provider.Send(ctx, &provider.Request{
 		Model:        rctx.Model,
 		SystemPrompt: prompt,
@@ -126,12 +113,8 @@ func (h *Handler) HandleRequest(ctx context.Context, req IncomingRequest) (Respo
 	}
 	fullText := sb.String()
 
-	// Return the connection to the pool as soon as streaming is done.
 	h.pool.Return(conn)
 
-	// Record the turn; token counts are not available from all providers,
-	// so we pass 0 for tokensSaved and use the prompt length as a rough proxy
-	// for tokensSent when a real count is unavailable.
 	tokensSent := len(prompt)
 	sess.RecordTurn(tokensSent, 0)
 
