@@ -3,6 +3,8 @@ package security
 import (
 	"regexp"
 	"strings"
+
+	"golang.org/x/text/unicode/norm"
 )
 
 // DetectorConfig configures the injection detector.
@@ -52,10 +54,21 @@ func NewInjectionDetector(cfg DetectorConfig) *InjectionDetector {
 	return &InjectionDetector{cfg: cfg, patterns: patterns}
 }
 
+// normalize strips zero-width characters and applies NFKC normalization
+// to defeat Unicode-based pattern bypass attempts.
+func normalize(s string) string {
+	r := strings.NewReplacer(
+		"\u200B", " ", "\u200C", " ", "\u200D", " ",
+		"\u200E", " ", "\u200F", " ", "\uFEFF", " ",
+	)
+	return norm.NFKC.String(r.Replace(s))
+}
+
 // Check scans input against all patterns and returns the first match.
 func (d *InjectionDetector) Check(input string) DetectionResult {
+	normalized := normalize(input)
 	for _, p := range d.patterns {
-		if p.pattern.MatchString(input) {
+		if p.pattern.MatchString(normalized) {
 			return DetectionResult{Detected: true, Pattern: p.name}
 		}
 	}
