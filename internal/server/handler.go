@@ -76,14 +76,13 @@ func (h *Handler) HandleRequest(ctx context.Context, req IncomingRequest) (Respo
 			return Response{}, err
 		}
 
-		// Serialize and store the identity.
+		// Serialize and store the identity directly on the session
+		// (avoids redundant map lookup through the manager).
 		serialized, err := h.serializer.Serialize(h.codebook, req.Identity)
 		if err != nil {
 			return Response{}, err
 		}
-		if err := h.sessions.SetIdentity(s.ID, serialized); err != nil {
-			return Response{}, err
-		}
+		s.SetIdentity(serialized)
 
 		sess = s
 	} else {
