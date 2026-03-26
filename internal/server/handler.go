@@ -97,12 +97,12 @@ func (h *Handler) HandleRequest(ctx context.Context, req IncomingRequest) (Respo
 		sess = s
 	}
 
-	// Snapshot the session to safely read SerializedIdentity.
-	snap := sess.Snapshot()
+	// Get only the fields needed for this request.
+	rctx := sess.RequestCtx()
 
 	// Assemble the structured prompt.
 	prompt := AssemblePrompt(PromptParts{
-		Identity: snap.SerializedIdentity,
+		Identity: rctx.SerializedIdentity,
 		Query:    req.Query,
 	})
 
@@ -114,7 +114,7 @@ func (h *Handler) HandleRequest(ctx context.Context, req IncomingRequest) (Respo
 
 	// Send to the LLM and collect streaming chunks.
 	chunks, err := conn.Provider.Send(ctx, &provider.Request{
-		Model:        snap.Opts.Model,
+		Model:        rctx.Model,
 		SystemPrompt: prompt,
 		Query:        req.Query,
 	})
@@ -142,7 +142,7 @@ func (h *Handler) HandleRequest(ctx context.Context, req IncomingRequest) (Respo
 	sess.RecordTurn(tokensSent, 0)
 
 	return Response{
-		SessionID:   snap.ID,
+		SessionID:   rctx.ID,
 		FullText:    fullText,
 		TotalTokens: tokensSent,
 	}, nil

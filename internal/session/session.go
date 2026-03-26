@@ -100,6 +100,26 @@ func (s *Session) Touch() {
 	s.LastActivity = time.Now()
 }
 
+// RequestContext returns the minimal fields needed for request handling
+// without copying the entire Session struct.
+type RequestContext struct {
+	ID                 string
+	SerializedIdentity string
+	Model              string
+}
+
+// RequestCtx returns a lightweight snapshot with only the fields needed
+// for prompt assembly and response construction.
+func (s *Session) RequestCtx() RequestContext {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return RequestContext{
+		ID:                 s.ID,
+		SerializedIdentity: s.SerializedIdentity,
+		Model:              s.Opts.Model,
+	}
+}
+
 // Snapshot returns a value copy of the session safe for reading without holding the lock.
 func (s *Session) Snapshot() Session {
 	s.mu.RLock()
