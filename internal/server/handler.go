@@ -53,14 +53,8 @@ func NewHandler(
 	}
 }
 
-// HandleRequest processes one client turn end-to-end:
-//  1. First request (no SessionID): validate identity, create session, serialize identity.
-//  2. Subsequent request (SessionID present): look up session, verify ownership.
-//  3. Assemble prompt from identity + query.
-//  4. Acquire a provider connection from the pool.
-//  5. Stream the LLM response and collect full text.
-//  6. Record the turn on the session.
-//  7. Return the connection to the pool.
+// HandleRequest processes one client turn: resolve/create session, assemble
+// prompt, call the LLM provider, and record the turn.
 func (h *Handler) HandleRequest(ctx context.Context, req IncomingRequest) (Response, error) {
 	var sess *session.Session
 
