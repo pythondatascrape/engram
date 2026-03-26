@@ -79,9 +79,10 @@ func (p *Pool) getOrCreateSubPool(key string) *subPool {
 // Get returns a connection for apiKey, reusing idle connections, creating new
 // ones under the limit, or blocking until one is returned or ctx is cancelled.
 func (p *Pool) Get(ctx context.Context, apiKey string) (*Conn, error) {
+	hk := hashKey(apiKey)
 	for {
 		p.mu.Lock()
-		sp := p.getOrCreateSubPool(apiKey)
+		sp := p.getOrCreateSubPool(hk)
 
 		if len(sp.available) > 0 {
 			conn := sp.available[len(sp.available)-1]
@@ -100,9 +101,9 @@ func (p *Pool) Get(ctx context.Context, apiKey string) (*Conn, error) {
 				p.mu.Lock()
 				sp.active--
 				p.mu.Unlock()
-				return nil, fmt.Errorf("pool: factory error for key %q: %w", apiKey, err)
+				return nil, fmt.Errorf("pool: factory error for key %q: %w", hk, err)
 			}
-			return &Conn{Provider: prov, key: apiKey}, nil
+			return &Conn{Provider: prov, key: hk}, nil
 		}
 
 		wait := make(chan struct{}, 1)
@@ -112,7 +113,7 @@ func (p *Pool) Get(ctx context.Context, apiKey string) (*Conn, error) {
 		select {
 		case <-ctx.Done():
 			p.mu.Lock()
-			sp2 := p.pools[apiKey]
+			sp2 := p.pools[hk]
 			if sp2 != nil {
 				for i, w := range sp2.waiters {
 					if w == wait {
