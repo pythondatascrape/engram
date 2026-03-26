@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	engramErrors "github.com/pythondatascrape/engram/internal/errors"
@@ -96,14 +97,18 @@ func (h *Handler) HandleRequest(ctx context.Context, req IncomingRequest) (Respo
 
 	if h.detector != nil {
 		if result := h.detector.Check(req.Query); result.Detected {
+			slog.Warn("injection detected", "client_id", req.ClientID, "pattern", result.Pattern, "source", "query")
 			return Response{}, engramErrors.INJECTION_DETECTED
 		}
 		if req.Identity != nil {
 			if result := h.detector.CheckIdentityValues(req.Identity); result.Detected {
+				slog.Warn("injection detected", "client_id", req.ClientID, "pattern", result.Pattern, "source", "identity")
 				return Response{}, engramErrors.INJECTION_DETECTED
 			}
 		}
 	}
+
+	slog.Debug("request received", "client_id", req.ClientID, "has_session", req.SessionID != "")
 
 	var sess *session.Session
 
@@ -120,6 +125,7 @@ func (h *Handler) HandleRequest(ctx context.Context, req IncomingRequest) (Respo
 			return Response{}, err
 		}
 		s.SetIdentity(serialized)
+		slog.Info("session created", "session_id", s.ID, "client_id", req.ClientID)
 		sess = s
 	} else {
 		s, err := h.sessions.Get(req.SessionID)
@@ -166,6 +172,8 @@ func (h *Handler) HandleRequest(ctx context.Context, req IncomingRequest) (Respo
 
 	tokensSent := len(prompt)
 	sess.RecordTurn(tokensSent, 0)
+
+	slog.Debug("request completed", "session_id", rctx.ID, "tokens_sent", tokensSent)
 
 	return Response{
 		SessionID:   rctx.ID,
