@@ -77,6 +77,43 @@ func TestUnsubscribe(t *testing.T) {
 	}
 }
 
+func TestPublishToNonExistentClient(t *testing.T) {
+	bus := events.NewBus()
+	// Should not panic — event is silently dropped.
+	bus.Publish(makeEvent("test.event"), "nobody")
+}
+
+func TestResubscribe(t *testing.T) {
+	bus := events.NewBus()
+
+	// First subscription.
+	ch1 := bus.Subscribe("client-re", []string{"a"})
+
+	// Re-subscribing should close the old channel.
+	ch2 := bus.Subscribe("client-re", []string{"b"})
+
+	// Old channel should be closed.
+	select {
+	case _, ok := <-ch1:
+		if ok {
+			t.Fatal("expected old channel to be closed after re-subscribe")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for old channel close")
+	}
+
+	// New channel should work.
+	bus.Publish(makeEvent("b"), "client-re")
+	select {
+	case received := <-ch2:
+		if received.Type != "b" {
+			t.Fatalf("expected type b, got %s", received.Type)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for event on new channel")
+	}
+}
+
 func TestBroadcast(t *testing.T) {
 	bus := events.NewBus()
 
