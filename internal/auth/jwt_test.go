@@ -3,6 +3,7 @@ package auth_test
 import (
 	"crypto/ed25519"
 	"crypto/rand"
+	"strings"
 	"testing"
 	"time"
 
@@ -78,11 +79,17 @@ func TestTamperedToken(t *testing.T) {
 		t.Fatalf("Issue() error: %v", err)
 	}
 
-	// Tamper: flip last character of the signature
-	tampered := token[:len(token)-1] + "X"
-	if tampered[len(tampered)-1] == token[len(token)-1] {
-		tampered = token[:len(token)-1] + "Y"
+	// Tamper: corrupt the middle of the signature to reliably break verification.
+	// Flipping only the last char is unreliable because base64 padding bits
+	// may not affect the decoded byte value.
+	parts := strings.Split(token, ".")
+	sig := parts[2]
+	mid := len(sig) / 2
+	replacement := byte('A')
+	if sig[mid] == 'A' {
+		replacement = 'B'
 	}
+	tampered := parts[0] + "." + parts[1] + "." + sig[:mid] + string(replacement) + sig[mid+1:]
 
 	_, err = issuer.Validate(tampered)
 	if err == nil {
