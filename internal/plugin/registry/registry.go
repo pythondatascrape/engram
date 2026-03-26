@@ -23,8 +23,7 @@ func New() *Registry {
 	}
 }
 
-// Register adds a plugin to the registry.
-// It returns an error if a plugin with the same name is already registered.
+// Register adds a plugin. Returns an error if the name is already taken.
 func (r *Registry) Register(p plugin.Plugin) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -38,8 +37,7 @@ func (r *Registry) Register(p plugin.Plugin) error {
 	return nil
 }
 
-// Get returns the plugin with the given name.
-// It returns an error if no such plugin is registered.
+// Get returns the plugin with the given name, or an error if not found.
 func (r *Registry) Get(name string) (plugin.Plugin, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -77,8 +75,7 @@ func (r *Registry) All() []plugin.Plugin {
 	return result
 }
 
-// StartAll calls Start on every registered plugin in insertion order.
-// It stops and returns the first error encountered.
+// StartAll starts every plugin in insertion order, returning the first error.
 func (r *Registry) StartAll(ctx context.Context) error {
 	for _, p := range r.All() {
 		if err := p.Start(ctx); err != nil {
@@ -88,8 +85,7 @@ func (r *Registry) StartAll(ctx context.Context) error {
 	return nil
 }
 
-// StopAll calls Stop on every registered plugin in insertion order.
-// It always attempts to stop every plugin; it returns the first error seen.
+// StopAll stops every plugin; returns the first error seen.
 func (r *Registry) StopAll(ctx context.Context) error {
 	var firstErr error
 	for _, p := range r.All() {
@@ -100,8 +96,7 @@ func (r *Registry) StopAll(ctx context.Context) error {
 	return firstErr
 }
 
-// Deregister removes the plugin with the given name from the registry.
-// It returns an error if no such plugin is registered.
+// Deregister removes the named plugin, or returns an error if not found.
 func (r *Registry) Deregister(name string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -111,7 +106,6 @@ func (r *Registry) Deregister(name string) error {
 	}
 	delete(r.plugins, name)
 
-	// Remove from order slice.
 	for i, n := range r.order {
 		if n == name {
 			r.order = append(r.order[:i], r.order[i+1:]...)
