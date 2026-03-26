@@ -43,9 +43,7 @@ type Session struct {
 
 const hexDigits = "0123456789abcdef"
 
-// generateID produces a 32-char hex session identifier using the fast
-// math/rand/v2 PRNG. Cryptographic uniqueness is not required for
-// ephemeral session IDs — only uniqueness within the server's lifetime.
+// generateID produces a 32-char hex session identifier using math/rand/v2.
 func generateID() string {
 	hi := rand.Uint64()
 	lo := rand.Uint64()
@@ -100,16 +98,14 @@ func (s *Session) Touch() {
 	s.LastActivity = time.Now()
 }
 
-// RequestContext returns the minimal fields needed for request handling
-// without copying the entire Session struct.
+// RequestContext holds the minimal fields needed for request handling.
 type RequestContext struct {
 	ID                 string
 	SerializedIdentity string
 	Model              string
 }
 
-// RequestCtx returns a lightweight snapshot with only the fields needed
-// for prompt assembly and response construction.
+// RequestCtx returns a lightweight snapshot for prompt assembly.
 func (s *Session) RequestCtx() RequestContext {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
