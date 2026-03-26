@@ -2,10 +2,10 @@
 package session
 
 import (
-	"encoding/hex"
-	"math/rand/v2"
 	"sync"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // Status represents the lifecycle state of a session.
@@ -42,37 +42,11 @@ type Session struct {
 	IdentityTokens     int
 }
 
-// generateID produces a 16-byte hex session identifier using the fast
-// math/rand/v2 PRNG. Cryptographic uniqueness is not required for
-// ephemeral session IDs — only uniqueness within the server's lifetime.
-func generateID() string {
-	var buf [16]byte
-	hi := rand.Uint64()
-	lo := rand.Uint64()
-	buf[0] = byte(hi >> 56)
-	buf[1] = byte(hi >> 48)
-	buf[2] = byte(hi >> 40)
-	buf[3] = byte(hi >> 32)
-	buf[4] = byte(hi >> 24)
-	buf[5] = byte(hi >> 16)
-	buf[6] = byte(hi >> 8)
-	buf[7] = byte(hi)
-	buf[8] = byte(lo >> 56)
-	buf[9] = byte(lo >> 48)
-	buf[10] = byte(lo >> 40)
-	buf[11] = byte(lo >> 32)
-	buf[12] = byte(lo >> 24)
-	buf[13] = byte(lo >> 16)
-	buf[14] = byte(lo >> 8)
-	buf[15] = byte(lo)
-	return hex.EncodeToString(buf[:])
-}
-
-// newSession constructs a new active session with a generated ID.
+// newSession constructs a new active session with a generated UUID.
 func newSession(clientID string, opts Opts) *Session {
 	now := time.Now()
 	return &Session{
-		ID:           generateID(),
+		ID:           uuid.New().String(),
 		ClientID:     clientID,
 		Status:       StatusActive,
 		CreatedAt:    now,
