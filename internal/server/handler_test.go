@@ -144,3 +144,95 @@ func TestHandleRequest_FirstRequest_NoIdentity_ReturnsError(t *testing.T) {
 	require.Error(t, err)
 	assert.Equal(t, engramErrors.IDENTITY_REQUIRED, err)
 }
+
+func TestHandleRequest_InvalidIdentity_SerializationError(t *testing.T) {
+	mgr, ser, cb, p := newTestDeps(t)
+	h := NewHandler(mgr, ser, cb, p)
+
+	req := IncomingRequest{
+		ClientID: "client-4",
+		APIKey:   "key-abc",
+		Query:    "test",
+		Identity: map[string]string{"unknown_field": "value"},
+		Opts:     session.Opts{Provider: "fake", Model: "fake-model"},
+	}
+
+	_, err := h.HandleRequest(context.Background(), req)
+	require.Error(t, err, "should fail with invalid identity field")
+}
+
+func TestHandleRequest_SessionNotFound(t *testing.T) {
+	mgr, ser, cb, p := newTestDeps(t)
+	h := NewHandler(mgr, ser, cb, p)
+
+	req := IncomingRequest{
+		ClientID:  "client-5",
+		APIKey:    "key-abc",
+		SessionID: "nonexistent-session-id",
+		Query:     "test",
+		Opts:      session.Opts{Provider: "fake", Model: "fake-model"},
+	}
+
+	_, err := h.HandleRequest(context.Background(), req)
+	require.Error(t, err, "should fail when session doesn't exist")
+}
+
+func TestHandleRequest_WrongOwnership(t *testing.T) {
+	mgr, ser, cb, p := newTestDeps(t)
+	h := NewHandler(mgr, ser, cb, p)
+
+	// Create a session as client-6.
+	first := IncomingRequest{
+		ClientID: "client-6",
+		APIKey:   "key-abc",
+		Query:    "Initial",
+		Identity: map[string]string{"role": "admin"},
+		Opts:     session.Opts{Provider: "fake", Model: "fake-model"},
+	}
+	resp, err := h.HandleRequest(context.Background(), first)
+	require.NoError(t, err)
+
+	// Try to use it as client-7.
+	stolen := IncomingRequest{
+		ClientID:  "client-7",
+		APIKey:    "key-abc",
+		SessionID: resp.SessionID,
+		Query:     "Steal",
+		Opts:      session.Opts{Provider: "fake", Model: "fake-model"},
+	}
+	_, err = h.HandleRequest(context.Background(), stolen)
+	require.Error(t, err, "should reject wrong client")
+}
+
+func TestHandleRequest_SessionLimitExceeded(t *testing.T) {
+	cb, err := codebook.Parse([]byte(testCodebookYAML))
+	require.NoError(t, err)
+
+	mgr := session.NewManager(session.ManagerConfig{MaxSessions: 1})
+	ser := serializer.New()
+	fakeFactory := func(_ string) (provider.Provider, error) {
+		return &fakeProvider{response: "ok"}, nil
+	}
+	p := pool.New(pool.Config{MaxConnections: 2}, fakeFactory)
+	h := NewHandler(mgr, ser, cb, p)
+
+	// First session succeeds.
+	_, err = h.HandleRequest(context.Background(), IncomingRequest{
+		ClientID: "client-8",
+		APIKey:   "key-abc",
+		Query:    "first",
+		Identity: map[string]string{"role": "user"},
+		Opts:     session.Opts{Provider: "fake", Model: "fake-model"},
+	})
+	require.NoError(t, err)
+
+	// Second session should fail due to limit.
+	_, err = h.HandleRequest(context.Background(), IncomingRequest{
+		ClientID: "client-9",
+		APIKey:   "key-abc",
+		Query:    "second",
+		Identity: map[string]string{"role": "user"},
+		Opts:     session.Opts{Provider: "fake", Model: "fake-model"},
+	})
+	require.Error(t, err, "should fail when session limit exceeded")
+}
