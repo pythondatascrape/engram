@@ -83,18 +83,16 @@ func (p *Provider) Healthcheck(ctx context.Context) error {
 	return nil
 }
 
-// Close releases provider resources (no-op for Anthropic).
+// Close is a no-op for Anthropic.
 func (p *Provider) Close() error {
 	return nil
 }
 
-// anthropicMessage is a single turn in the Anthropic Messages API format.
 type anthropicMessage struct {
 	Role    string `json:"role"`
 	Content string `json:"content"`
 }
 
-// anthropicRequest is the JSON body sent to /v1/messages.
 type anthropicRequest struct {
 	Model     string             `json:"model"`
 	MaxTokens int                `json:"max_tokens"`
@@ -103,7 +101,6 @@ type anthropicRequest struct {
 	Stream    bool               `json:"stream"`
 }
 
-// sseEvent represents a parsed SSE event.
 type sseEvent struct {
 	Type  string          `json:"type"`
 	Delta *sseDelta       `json:"delta,omitempty"`
@@ -117,7 +114,6 @@ type sseDelta struct {
 
 // Send submits the request to the Anthropic Messages API and returns a streaming channel.
 func (p *Provider) Send(ctx context.Context, req *provider.Request) (<-chan provider.Chunk, error) {
-	// Build messages list from history + current query.
 	msgs := make([]anthropicMessage, 0, len(req.ConversationHistory)+1)
 	for _, m := range req.ConversationHistory {
 		msgs = append(msgs, anthropicMessage{Role: m.Role, Content: m.Content})
@@ -196,7 +192,6 @@ func (p *Provider) Send(ctx context.Context, req *provider.Request) (<-chan prov
 			}
 		}
 
-		// If scanner ends without message_stop, send Done anyway.
 		select {
 		case ch <- provider.Chunk{Done: true}:
 		case <-ctx.Done():
