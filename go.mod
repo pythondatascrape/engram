@@ -5,6 +5,7 @@ go 1.26
 require (
 	github.com/google/uuid v1.6.0
 	github.com/stretchr/testify v1.11.1
+	google.golang.org/protobuf v1.36.11
 	gopkg.in/yaml.v3 v3.0.1
 )
 

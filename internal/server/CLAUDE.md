@@ -7,6 +7,8 @@
 
 | ID | Time | T | Title | Read |
 |----|------|---|-------|------|
+| #9815 | 8:28 PM | 🔄 | Optimized Handler Connection Pooling and Rune Counting | ~464 |
+| #9804 | 8:24 PM | 🔵 | Request Handler Orchestration Layer | ~1047 |
 | #9790 | 4:04 PM | 🟣 | Core Request Handler Pipeline | ~830 |
 | #9789 | " | 🟣 | Request Handler Core Pipeline with Session Management | ~841 |
 | #9765 | 3:57 PM | 🟣 | Prompt Assembler with Delimiter-Based Structure | ~735 |
