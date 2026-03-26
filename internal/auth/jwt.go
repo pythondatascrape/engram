@@ -16,6 +16,8 @@ type Claims struct {
 	IssuedAt  int64    `json:"iat"`
 	ExpiresAt int64    `json:"exp"`
 	Role      string   `json:"role,omitempty"`
+	Issuer    string   `json:"iss,omitempty"`
+	Audience  string   `json:"aud,omitempty"`
 }
 
 // JWTIssuer issues and validates Ed25519-signed JWTs.
@@ -23,11 +25,24 @@ type JWTIssuer struct {
 	privateKey ed25519.PrivateKey
 	publicKey  ed25519.PublicKey
 	expiry     time.Duration
+	issuer     string
+	audience   string
+	isRevoked  func(*Claims) bool
 }
 
 // NewJWTIssuer returns a new JWTIssuer.
 func NewJWTIssuer(priv ed25519.PrivateKey, pub ed25519.PublicKey, expiry time.Duration) *JWTIssuer {
 	return &JWTIssuer{privateKey: priv, publicKey: pub, expiry: expiry}
+}
+
+// NewJWTIssuerWithIdentity returns a new JWTIssuer that stamps iss and aud on every token.
+func NewJWTIssuerWithIdentity(priv ed25519.PrivateKey, pub ed25519.PublicKey, expiry time.Duration, issuer, audience string) *JWTIssuer {
+	return &JWTIssuer{privateKey: priv, publicKey: pub, expiry: expiry, issuer: issuer, audience: audience}
+}
+
+// SetRevocationCheck registers a callback that returns true when a token should be rejected.
+func (j *JWTIssuer) SetRevocationCheck(fn func(*Claims) bool) {
+	j.isRevoked = fn
 }
 
 var enc = base64.RawURLEncoding
@@ -47,6 +62,8 @@ func (j *JWTIssuer) Issue(clientID string, providers []string) (string, error) {
 		Providers: providers,
 		IssuedAt:  now.Unix(),
 		ExpiresAt: now.Add(j.expiry).Unix(),
+		Issuer:    j.issuer,
+		Audience:  j.audience,
 	}
 	payloadJSON, err := json.Marshal(claims)
 	if err != nil {
@@ -90,6 +107,17 @@ func (j *JWTIssuer) Validate(token string) (*Claims, error) {
 
 	if time.Now().Unix() > claims.ExpiresAt {
 		return nil, errors.New("auth: token expired")
+	}
+
+	if j.issuer != "" && claims.Issuer != j.issuer {
+		return nil, errors.New("auth: token issuer mismatch")
+	}
+	if j.audience != "" && claims.Audience != j.audience {
+		return nil, errors.New("auth: token audience mismatch")
+	}
+
+	if j.isRevoked != nil && j.isRevoked(&claims) {
+		return nil, errors.New("auth: token revoked")
 	}
 
 	return &claims, nil
