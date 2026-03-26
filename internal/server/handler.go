@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"strings"
+	"unicode/utf8"
 
 	engramErrors "github.com/pythondatascrape/engram/internal/errors"
 	"github.com/pythondatascrape/engram/internal/identity/codebook"
@@ -133,17 +134,16 @@ func (h *Handler) HandleRequest(ctx context.Context, req IncomingRequest) (Respo
 	}
 	fullText := sb.String()
 
+	// Return the connection to the pool as soon as streaming is done.
+	h.pool.Return(conn)
+
 	// Record the turn; token counts are not available from all providers,
 	// so we pass 0 for tokensSaved and use the prompt length as a rough proxy
 	// for tokensSent when a real count is unavailable.
-	tokensSent := len([]rune(prompt))
+	tokensSent := utf8.RuneCountInString(prompt)
 	if err := h.sessions.RecordTurn(snap.ID, tokensSent, 0); err != nil {
-		h.pool.Return(conn)
 		return Response{}, err
 	}
-
-	// Return the connection to the pool.
-	h.pool.Return(conn)
 
 	return Response{
 		SessionID:   snap.ID,

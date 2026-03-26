@@ -6,9 +6,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/pythondatascrape/engram/internal/provider"
 )
@@ -41,7 +41,9 @@ func New(apiKey string, opts ...Option) *Provider {
 	p := &Provider{
 		apiKey:  apiKey,
 		baseURL: defaultBaseURL,
-		client:  &http.Client{},
+		client: &http.Client{
+			Timeout: 5 * time.Minute,
+		},
 	}
 	for _, opt := range opts {
 		opt(p)
@@ -160,6 +162,7 @@ func (p *Provider) Send(ctx context.Context, req *provider.Request) (<-chan prov
 		defer resp.Body.Close()
 
 		scanner := bufio.NewScanner(resp.Body)
+		scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 		var eventType string
 
 		for scanner.Scan() {
@@ -205,8 +208,3 @@ func (p *Provider) Send(ctx context.Context, req *provider.Request) (<-chan prov
 
 // Ensure Provider satisfies the interface at compile time.
 var _ provider.Provider = (*Provider)(nil)
-
-// readAll drains resp body safely.
-func readAll(r io.Reader) {
-	io.Copy(io.Discard, r) //nolint:errcheck
-}

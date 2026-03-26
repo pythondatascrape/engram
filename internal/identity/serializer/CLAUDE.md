@@ -7,6 +7,7 @@
 
 | ID | Time | T | Title | Read |
 |----|------|---|-------|------|
+| #9856 | 9:51 PM | 🔵 | Identity Serializer: Self-Describing Key-Value Format with Deterministic Ordering | ~778 |
 | #9737 | 3:23 PM | 🟣 | Implemented Serializer Component with Self-Describing Key-Value Format | ~705 |
 | #9729 | 3:22 PM | 🟣 | Identity Serializer Implementation with Codebook Validation | ~521 |
 | #9728 | " | 🟣 | Serializer Test Suite Created with Validation and Determinism Tests | ~588 |

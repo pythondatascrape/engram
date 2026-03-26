@@ -9,7 +9,7 @@ import (
 type Event struct {
 	Type      string
 	Timestamp time.Time
-	Data      map[string]interface{}
+	Data      map[string]any
 }
 
 // subscriber holds the delivery channel and optional type filter for one client.
@@ -20,7 +20,7 @@ type subscriber struct {
 
 // Bus is a thread-safe, in-process event bus.
 type Bus struct {
-	sync.RWMutex
+	mu          sync.RWMutex
 	subscribers map[string]*subscriber
 }
 
@@ -34,8 +34,8 @@ func NewBus() *Bus {
 // Subscribe registers clientID and returns a channel on which the client will
 // receive events. Pass nil (or empty) types to receive all event types.
 func (b *Bus) Subscribe(clientID string, types []string) <-chan Event {
-	b.Lock()
-	defer b.Unlock()
+	b.mu.Lock()
+	defer b.mu.Unlock()
 
 	var filters map[string]bool
 	if len(types) > 0 {
@@ -43,6 +43,11 @@ func (b *Bus) Subscribe(clientID string, types []string) <-chan Event {
 		for _, t := range types {
 			filters[t] = true
 		}
+	}
+
+	// Close existing subscriber channel to prevent leak.
+	if old, ok := b.subscribers[clientID]; ok {
+		close(old.ch)
 	}
 
 	sub := &subscriber{
@@ -55,8 +60,8 @@ func (b *Bus) Subscribe(clientID string, types []string) <-chan Event {
 
 // Unsubscribe closes the client's channel and removes them from the bus.
 func (b *Bus) Unsubscribe(clientID string) {
-	b.Lock()
-	defer b.Unlock()
+	b.mu.Lock()
+	defer b.mu.Unlock()
 
 	if sub, ok := b.subscribers[clientID]; ok {
 		close(sub.ch)
@@ -67,9 +72,9 @@ func (b *Bus) Unsubscribe(clientID string) {
 // Publish sends evt to the specific client. The event is dropped (non-blocking)
 // if the client's buffer is full or the type is filtered out.
 func (b *Bus) Publish(evt Event, clientID string) {
-	b.RLock()
+	b.mu.RLock()
 	sub, ok := b.subscribers[clientID]
-	b.RUnlock()
+	b.mu.RUnlock()
 
 	if !ok {
 		return
@@ -79,12 +84,12 @@ func (b *Bus) Publish(evt Event, clientID string) {
 
 // Broadcast sends evt to every subscriber, respecting per-subscriber filters.
 func (b *Bus) Broadcast(evt Event) {
-	b.RLock()
+	b.mu.RLock()
 	subs := make([]*subscriber, 0, len(b.subscribers))
 	for _, sub := range b.subscribers {
 		subs = append(subs, sub)
 	}
-	b.RUnlock()
+	b.mu.RUnlock()
 
 	for _, sub := range subs {
 		deliver(sub, evt)

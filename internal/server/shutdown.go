@@ -44,7 +44,7 @@ func (sc *ShutdownCoordinator) Shutdown(ctx context.Context) {
 		sc.bus.Broadcast(events.Event{
 			Type:      "server.draining",
 			Timestamp: time.Now(),
-			Data:      map[string]interface{}{"reason": "server shutdown"},
+			Data:      map[string]any{"reason": "server shutdown"},
 		})
 	}
 

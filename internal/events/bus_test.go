@@ -11,7 +11,7 @@ func makeEvent(t string) events.Event {
 	return events.Event{
 		Type:      t,
 		Timestamp: time.Now(),
-		Data:      map[string]interface{}{"key": "value"},
+		Data:      map[string]any{"key": "value"},
 	}
 }
 
