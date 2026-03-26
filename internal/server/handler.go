@@ -133,7 +133,7 @@ func (h *Handler) HandleRequest(ctx context.Context, req IncomingRequest) (Respo
 		if err != nil {
 			return Response{}, err
 		}
-		if err := h.sessions.CheckOwnership(req.SessionID, req.ClientID); err != nil {
+		if err := s.CheckOwnership(req.ClientID); err != nil {
 			return Response{}, err
 		}
 		sess = s
