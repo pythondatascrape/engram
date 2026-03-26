@@ -10,6 +10,7 @@ import (
 	"github.com/pythondatascrape/engram/internal/identity/serializer"
 	"github.com/pythondatascrape/engram/internal/provider"
 	"github.com/pythondatascrape/engram/internal/provider/pool"
+	"github.com/pythondatascrape/engram/internal/security"
 	"github.com/pythondatascrape/engram/internal/session"
 )
 
@@ -42,6 +43,7 @@ type Handler struct {
 	serializer *serializer.Serializer
 	codebook   *codebook.Codebook
 	pool       *pool.Pool
+	detector   *security.InjectionDetector
 }
 
 // NewHandler constructs a Handler with its dependencies.
@@ -59,6 +61,23 @@ func NewHandler(
 	}
 }
 
+// NewHandlerWithSecurity constructs a Handler with an injection detector.
+func NewHandlerWithSecurity(
+	sessions *session.Manager,
+	ser *serializer.Serializer,
+	cb *codebook.Codebook,
+	p *pool.Pool,
+	det *security.InjectionDetector,
+) *Handler {
+	return &Handler{
+		sessions:   sessions,
+		serializer: ser,
+		codebook:   cb,
+		pool:       p,
+		detector:   det,
+	}
+}
+
 // HandleRequest processes one client turn: resolve/create session, assemble
 // prompt, call the LLM provider, and record the turn.
 func (h *Handler) HandleRequest(ctx context.Context, req IncomingRequest) (Response, error) {
@@ -72,6 +91,17 @@ func (h *Handler) HandleRequest(ctx context.Context, req IncomingRequest) (Respo
 		}
 		if total > maxIdentityBytes {
 			return Response{}, fmt.Errorf("identity exceeds maximum size of %d bytes", maxIdentityBytes)
+		}
+	}
+
+	if h.detector != nil {
+		if result := h.detector.Check(req.Query); result.Detected {
+			return Response{}, engramErrors.INJECTION_DETECTED
+		}
+		if req.Identity != nil {
+			if result := h.detector.CheckIdentityValues(req.Identity); result.Detected {
+				return Response{}, engramErrors.INJECTION_DETECTED
+			}
 		}
 	}
 
