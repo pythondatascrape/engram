@@ -129,3 +129,51 @@ func TestIssueNoProviders(t *testing.T) {
 		t.Errorf("Providers = %v, want empty", claims.Providers)
 	}
 }
+
+func TestBadSignatureEncoding(t *testing.T) {
+	priv, pub := generateKeys(t)
+	issuer := auth.NewJWTIssuer(priv, pub, 5*time.Minute)
+
+	token, err := issuer.Issue("client-id", nil)
+	if err != nil {
+		t.Fatalf("Issue() error: %v", err)
+	}
+
+	// Replace signature with invalid base64 characters.
+	parts := strings.Split(token, ".")
+	badToken := parts[0] + "." + parts[1] + ".!!!invalid-base64!!!"
+
+	_, err = issuer.Validate(badToken)
+	if err == nil {
+		t.Fatal("Validate() should return error for bad signature encoding")
+	}
+}
+
+func TestIssueWithRole(t *testing.T) {
+	priv, pub := generateKeys(t)
+	issuer := auth.NewJWTIssuer(priv, pub, 5*time.Minute)
+
+	token, err := issuer.Issue("client-id", []string{"anthropic"})
+	if err != nil {
+		t.Fatalf("Issue() error: %v", err)
+	}
+
+	claims, err := issuer.Validate(token)
+	if err != nil {
+		t.Fatalf("Validate() error: %v", err)
+	}
+	// Role should be empty by default since Issue doesn't set it.
+	if claims.Role != "" {
+		t.Errorf("expected empty Role, got %q", claims.Role)
+	}
+}
+
+func TestValidateEmptyToken(t *testing.T) {
+	priv, pub := generateKeys(t)
+	issuer := auth.NewJWTIssuer(priv, pub, 5*time.Minute)
+
+	_, err := issuer.Validate("")
+	if err == nil {
+		t.Fatal("Validate() should return error for empty token")
+	}
+}
