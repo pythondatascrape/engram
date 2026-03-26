@@ -85,3 +85,99 @@ func TestAnthropicHealthcheck(t *testing.T) {
 	p := anthropic.New("test-key", anthropic.WithBaseURL(srv.URL))
 	assert.NoError(t, p.Healthcheck(t.Context()))
 }
+
+func TestAnthropicHealthcheckFailure(t *testing.T) {
+	// Point to a server that immediately closes.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hj, ok := w.(http.Hijacker)
+		if ok {
+			conn, _, _ := hj.Hijack()
+			conn.Close()
+		}
+	}))
+	defer srv.Close()
+
+	p := anthropic.New("test-key", anthropic.WithBaseURL(srv.URL))
+	err := p.Healthcheck(t.Context())
+	assert.Error(t, err)
+}
+
+func TestAnthropicSendNon200(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusTooManyRequests)
+	}))
+	defer srv.Close()
+
+	p := anthropic.New("test-key", anthropic.WithBaseURL(srv.URL))
+
+	req := &provider.Request{
+		Model: "claude-sonnet-4-6",
+		Query: "hello",
+	}
+
+	_, err := p.Send(t.Context(), req)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "unexpected status 429")
+}
+
+func TestAnthropicSendWithConversationHistory(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, sseBody([]string{"response"}))
+	}))
+	defer srv.Close()
+
+	p := anthropic.New("test-key", anthropic.WithBaseURL(srv.URL))
+
+	req := &provider.Request{
+		Model:        "claude-sonnet-4-6",
+		SystemPrompt: "Be helpful.",
+		Query:        "Follow up question",
+		ConversationHistory: []provider.Message{
+			{Role: "user", Content: "First question"},
+			{Role: "assistant", Content: "First answer"},
+		},
+	}
+
+	ch, err := p.Send(t.Context(), req)
+	require.NoError(t, err)
+
+	var collected strings.Builder
+	for chunk := range ch {
+		if chunk.Done {
+			break
+		}
+		collected.WriteString(chunk.Text)
+	}
+	assert.Equal(t, "response", collected.String())
+}
+
+func TestAnthropicSendScannerEndsWithoutMessageStop(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		// Send content but NO message_stop event.
+		fmt.Fprint(w, "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"partial\"}}\n\n")
+	}))
+	defer srv.Close()
+
+	p := anthropic.New("test-key", anthropic.WithBaseURL(srv.URL))
+
+	req := &provider.Request{
+		Model: "claude-sonnet-4-6",
+		Query: "hello",
+	}
+
+	ch, err := p.Send(t.Context(), req)
+	require.NoError(t, err)
+
+	var gotDone bool
+	for chunk := range ch {
+		if chunk.Done {
+			gotDone = true
+			break
+		}
+	}
+	assert.True(t, gotDone, "should receive Done chunk even without message_stop")
+}
