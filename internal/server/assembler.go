@@ -26,7 +26,16 @@ type PromptParts struct {
 //	[QUERY]
 //	What are the egress requirements?
 func AssemblePrompt(parts PromptParts) string {
+	// Pre-calculate exact size to avoid reallocation.
+	// Fixed delimiters: "[IDENTITY]\n" (11) + "\n" (1) + "\n[QUERY]\n" (9) = 21
+	size := 21 + len(parts.Identity) + len(parts.Query)
+	if parts.Knowledge != "" {
+		// "\n[KNOWLEDGE]\n" (14) + "\n" (1) = 15
+		size += 15 + len(parts.Knowledge)
+	}
+
 	var b strings.Builder
+	b.Grow(size)
 
 	b.WriteString("[IDENTITY]\n")
 	b.WriteString(parts.Identity)
