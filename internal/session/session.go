@@ -6,6 +6,8 @@ import (
 	"encoding/hex"
 	"sync"
 	"time"
+
+	engramErrors "github.com/pythondatascrape/engram/internal/errors"
 )
 
 // Status represents the lifecycle state of a session.
@@ -62,6 +64,17 @@ func newSession(clientID string, opts Opts) *Session {
 		LastActivity: now,
 		Opts:         opts,
 	}
+}
+
+// CheckOwnership returns PERMISSION_DENIED if clientID does not own the session.
+func (s *Session) CheckOwnership(clientID string) error {
+	s.mu.RLock()
+	owner := s.ClientID
+	s.mu.RUnlock()
+	if owner != clientID {
+		return engramErrors.PERMISSION_DENIED
+	}
+	return nil
 }
 
 // SetIdentity stores a serialized identity blob on the session.
