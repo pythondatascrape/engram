@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -23,11 +24,23 @@ const (
 type Option func(*Provider)
 
 // WithBaseURL overrides the default Anthropic API base URL.
-func WithBaseURL(url string) Option {
+// Only HTTPS URLs are accepted; HTTP is allowed only for loopback addresses (testing).
+func WithBaseURL(rawURL string) Option {
 	return func(p *Provider) {
-		p.baseURL = url
+		u, err := url.Parse(rawURL)
+		if err != nil {
+			return
+		}
+		if u.Scheme == "https" {
+			p.baseURL = rawURL
+		} else if u.Scheme == "http" && (u.Hostname() == "127.0.0.1" || u.Hostname() == "localhost" || u.Hostname() == "::1") {
+			p.baseURL = rawURL
+		}
 	}
 }
+
+// BaseURL returns the configured base URL.
+func (p *Provider) BaseURL() string { return p.baseURL }
 
 // Provider is the built-in Anthropic provider.
 type Provider struct {

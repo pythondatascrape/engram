@@ -153,6 +153,23 @@ func TestAnthropicSendWithConversationHistory(t *testing.T) {
 	assert.Equal(t, "response", collected.String())
 }
 
+func TestAnthropicNew_RejectsHTTPBaseURL(t *testing.T) {
+	p := anthropic.New("test-key", anthropic.WithBaseURL("http://evil.example.com"))
+	assert.Equal(t, "https://api.anthropic.com", p.BaseURL())
+}
+
+func TestAnthropicNew_AcceptsHTTPSBaseURL(t *testing.T) {
+	custom := "https://custom.api.anthropic.com"
+	p := anthropic.New("test-key", anthropic.WithBaseURL(custom))
+	assert.Equal(t, custom, p.BaseURL())
+}
+
+func TestAnthropicNew_AcceptsLocalhostForTesting(t *testing.T) {
+	loopback := "http://127.0.0.1:8080"
+	p := anthropic.New("test-key", anthropic.WithBaseURL(loopback))
+	assert.Equal(t, loopback, p.BaseURL())
+}
+
 func TestAnthropicSendScannerEndsWithoutMessageStop(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
