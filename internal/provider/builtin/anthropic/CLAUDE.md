@@ -7,5 +7,5 @@
 
 | ID | Time | T | Title | Read |
 |----|------|---|-------|------|
-| #9705 | 1:58 PM | ✅ | Added Phase 0 Bootstrap to Engram Implementation Plan | ~375 |
+| #9777 | 4:01 PM | 🟣 | Anthropic Provider Adapter with SSE Streaming | ~902 |
 </claude-mem-context>

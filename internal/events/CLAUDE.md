@@ -7,5 +7,5 @@
 
 | ID | Time | T | Title | Read |
 |----|------|---|-------|------|
-| #9705 | 1:58 PM | ✅ | Added Phase 0 Bootstrap to Engram Implementation Plan | ~375 |
+| #9779 | 4:01 PM | 🟣 | Event Bus Implemented with Per-Client Type Filtering | ~569 |
 </claude-mem-context>
