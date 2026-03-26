@@ -7,6 +7,7 @@
 
 | ID | Time | T | Title | Read |
 |----|------|---|-------|------|
+| #9792 | 4:05 PM | 🟣 | Codebook Parser and Validator Implementation | ~950 |
 | #9739 | 3:23 PM | 🟣 | Codebook Parsing and Identity Validation Package | ~240 |
 | #9734 | " | 🟣 | Codebook Schema Implementation with YAML Parsing and Validation | ~930 |
 | #9732 | 3:22 PM | 🟣 | Codebook Schema Parser and Validator Implementation | ~920 |

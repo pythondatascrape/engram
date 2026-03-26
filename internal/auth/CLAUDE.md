@@ -7,5 +7,5 @@
 
 | ID | Time | T | Title | Read |
 |----|------|---|-------|------|
-| #9705 | 1:58 PM | ✅ | Added Phase 0 Bootstrap to Engram Implementation Plan | ~375 |
+| #9746 | 3:26 PM | 🟣 | JWT Authentication with Ed25519 Signatures | ~617 |
 </claude-mem-context>

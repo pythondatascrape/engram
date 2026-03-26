@@ -7,5 +7,5 @@
 
 | ID | Time | T | Title | Read |
 |----|------|---|-------|------|
-| #9705 | 1:58 PM | ✅ | Added Phase 0 Bootstrap to Engram Implementation Plan | ~375 |
+| #9758 | 3:55 PM | 🟣 | QUIC Stream Type Multiplexing: Four Stream Types for Request, State, Events, and Close | ~712 |
 </claude-mem-context>
