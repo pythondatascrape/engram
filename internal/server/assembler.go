@@ -9,22 +9,8 @@ type PromptParts struct {
 	Query     string
 }
 
-// AssemblePrompt creates the structured system prompt with delimiters.
-// The assembled prompt uses clear structural delimiters to help the LLM
-// distinguish between identity context, knowledge, and user input.
-//
-// If Knowledge is empty, the [KNOWLEDGE] section is omitted entirely.
-//
-// Example output:
-//
-//	[IDENTITY]
-//	domain=fire rank=captain experience=20
-//
-//	[KNOWLEDGE]
-//	Fire code Section 4.2: All commercial buildings require...
-//
-//	[QUERY]
-//	What are the egress requirements?
+// AssemblePrompt creates the structured system prompt with [IDENTITY],
+// optional [KNOWLEDGE], and [QUERY] delimiters.
 func AssemblePrompt(parts PromptParts) string {
 	// Pre-calculate exact size to avoid reallocation.
 	// Fixed delimiters: "[IDENTITY]\n" (11) + "\n" (1) + "\n[QUERY]\n" (9) = 21
