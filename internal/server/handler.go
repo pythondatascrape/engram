@@ -13,16 +13,19 @@ import (
 	"github.com/pythondatascrape/engram/internal/provider/pool"
 	"github.com/pythondatascrape/engram/internal/security"
 	"github.com/pythondatascrape/engram/internal/session"
+
+	engramctx "github.com/pythondatascrape/engram/internal/context"
 )
 
 // IncomingRequest holds all fields sent by the client for a single turn.
 type IncomingRequest struct {
-	ClientID  string
-	APIKey    string
-	SessionID string
-	Query     string
-	Identity  map[string]string
-	Opts      session.Opts
+	ClientID      string
+	APIKey        string
+	SessionID     string
+	Query         string
+	Identity      map[string]string
+	ContextSchema map[string]string // optional — field name → type hint for context codebook
+	Opts          session.Opts
 }
 
 // Response is the result returned to the caller after a turn is processed.
@@ -80,6 +83,11 @@ func NewHandlerWithSecurity(
 	}
 }
 
+// Handle is an alias for HandleRequest.
+func (h *Handler) Handle(ctx context.Context, req IncomingRequest) (Response, error) {
+	return h.HandleRequest(ctx, req)
+}
+
 // HandleRequest processes one client turn: resolve/create session, assemble
 // prompt, call the LLM provider, and record the turn.
 func (h *Handler) HandleRequest(ctx context.Context, req IncomingRequest) (Response, error) {
@@ -126,6 +134,14 @@ func (h *Handler) HandleRequest(ctx context.Context, req IncomingRequest) (Respo
 			return Response{}, err
 		}
 		s.SetIdentity(serialized)
+		if len(req.ContextSchema) > 0 {
+			ctxCB, err := engramctx.DeriveCodebook(req.ClientID, req.ContextSchema)
+			if err != nil {
+				return Response{}, fmt.Errorf("context codebook: %w", err)
+			}
+			s.SetContextCodebook(ctxCB)
+			s.SetHistory(engramctx.NewHistory())
+		}
 		slog.Info("session created", "session_id", s.ID, "client_id", req.ClientID)
 		sess = s
 	} else {
@@ -140,9 +156,19 @@ func (h *Handler) HandleRequest(ctx context.Context, req IncomingRequest) (Respo
 	}
 
 	rctx := sess.RequestCtx()
+
+	var ctxCodebookDef, respCodebookDef string
+	if rctx.ContextCodebook != nil {
+		ctxCodebookDef = rctx.ContextCodebook.Definition()
+		respCodebookDef = engramctx.AnthropicResponseCodebook().Definition()
+	}
+
 	prompt := AssemblePrompt(PromptParts{
-		Identity: rctx.SerializedIdentity,
-		Query:    req.Query,
+		Identity:            rctx.SerializedIdentity,
+		ContextCodebookDef:  ctxCodebookDef,
+		ResponseCodebookDef: respCodebookDef,
+		History:             rctx.History,
+		Query:               req.Query,
 	})
 
 	conn, err := h.pool.Get(ctx, req.APIKey)
@@ -150,10 +176,16 @@ func (h *Handler) HandleRequest(ctx context.Context, req IncomingRequest) (Respo
 		return Response{}, err
 	}
 
+	var history []provider.Message
+	if rctx.History != nil {
+		history = rctx.History.Messages()
+	}
+
 	chunks, err := conn.Provider.Send(ctx, &provider.Request{
-		Model:        rctx.Model,
-		SystemPrompt: prompt,
-		Query:        req.Query,
+		Model:               rctx.Model,
+		SystemPrompt:        prompt,
+		Query:               req.Query,
+		ConversationHistory: history,
 	})
 	if err != nil {
 		h.pool.Return(conn)
@@ -174,6 +206,22 @@ func (h *Handler) HandleRequest(ctx context.Context, req IncomingRequest) (Respo
 	fullText := sb.String()
 
 	h.pool.Return(conn)
+
+	if sess.ContextCodebook != nil && sess.History != nil {
+		requestTurn := map[string]string{
+			"role":    "user",
+			"content": req.Query,
+		}
+		respCB := engramctx.AnthropicResponseCodebook()
+		compressedResp, _ := respCB.SerializeTurn(map[string]string{
+			"role":    "assistant",
+			"content": fullText,
+		})
+		if compressedResp == "" {
+			compressedResp = "role=assistant content=" + fullText
+		}
+		_ = sess.History.Append(sess.ContextCodebook, requestTurn, compressedResp)
+	}
 
 	tokensSent := len(prompt)
 	sess.RecordTurn(tokensSent, 0)
