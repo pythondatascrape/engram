@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	engramErrors "github.com/pythondatascrape/engram/internal/errors"
+	engramctx "github.com/pythondatascrape/engram/internal/context"
 	"github.com/pythondatascrape/engram/internal/session"
 )
 
@@ -257,4 +258,19 @@ func TestEvictIdleKeepsActive(t *testing.T) {
 	evicted := m.EvictIdle()
 	assert.Empty(t, evicted)
 	assert.Equal(t, 1, m.Count())
+}
+
+func TestSession_HistoryIntegration(t *testing.T) {
+	ctx := context.Background()
+	m := session.NewManager(session.ManagerConfig{MaxSessions: 10})
+	s, err := m.Create(ctx, "client-1", session.Opts{})
+	require.NoError(t, err)
+
+	cb, _ := engramctx.DeriveCodebook("app", map[string]string{"role": "text", "content": "text"})
+	s.SetContextCodebook(cb)
+	s.SetHistory(engramctx.NewHistory())
+
+	snap := s.Snapshot()
+	assert.NotNil(t, snap.History)
+	assert.NotNil(t, snap.ContextCodebook)
 }
