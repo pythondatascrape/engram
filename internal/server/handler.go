@@ -207,7 +207,7 @@ func (h *Handler) HandleRequest(ctx context.Context, req IncomingRequest) (Respo
 
 	h.pool.Return(conn)
 
-	if sess.ContextCodebook != nil && sess.History != nil {
+	if rctx.ContextCodebook != nil && rctx.History != nil {
 		requestTurn := map[string]string{
 			"role":    "user",
 			"content": req.Query,
@@ -220,7 +220,7 @@ func (h *Handler) HandleRequest(ctx context.Context, req IncomingRequest) (Respo
 		if compressedResp == "" {
 			compressedResp = "role=assistant content=" + fullText
 		}
-		_ = sess.History.Append(sess.ContextCodebook, requestTurn, compressedResp)
+		_ = rctx.History.Append(rctx.ContextCodebook, requestTurn, compressedResp)
 	}
 
 	tokensSent := len(prompt)
