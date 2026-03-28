@@ -8,30 +8,44 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestAnthropicCodebook_Serialize(t *testing.T) {
-	cb := engramctx.AnthropicResponseCodebook()
-	resp := map[string]string{
-		"role":        "assistant",
-		"stop_reason": "end_turn",
-		"model":       "claude-sonnet-4-6",
+func TestResponseCodebook_Serialize(t *testing.T) {
+	tests := []struct {
+		name       string
+		codebook   func() *engramctx.ContextCodebook
+		input      map[string]string
+		wantFields []string
+	}{
+		{
+			name:     "anthropic",
+			codebook: engramctx.AnthropicResponseCodebook,
+			input: map[string]string{
+				"role":        "assistant",
+				"stop_reason": "end_turn",
+				"model":       "claude-sonnet-4-6",
+			},
+			wantFields: []string{"role=assistant", "stop_reason=end_turn"},
+		},
+		{
+			name:     "openai",
+			codebook: engramctx.OpenAIResponseCodebook,
+			input: map[string]string{
+				"role":          "assistant",
+				"finish_reason": "stop",
+				"model":         "gpt-4o",
+			},
+			wantFields: []string{"role=assistant", "finish_reason=stop"},
+		},
 	}
-	compressed, err := cb.SerializeTurn(resp)
-	require.NoError(t, err)
-	assert.Contains(t, compressed, "role=assistant")
-	assert.Contains(t, compressed, "stop_reason=end_turn")
-}
-
-func TestOpenAICodebook_Serialize(t *testing.T) {
-	cb := engramctx.OpenAIResponseCodebook()
-	resp := map[string]string{
-		"role":          "assistant",
-		"finish_reason": "stop",
-		"model":         "gpt-4o",
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cb := tc.codebook()
+			compressed, err := cb.SerializeTurn(tc.input)
+			require.NoError(t, err)
+			for _, want := range tc.wantFields {
+				assert.Contains(t, compressed, want)
+			}
+		})
 	}
-	compressed, err := cb.SerializeTurn(resp)
-	require.NoError(t, err)
-	assert.Contains(t, compressed, "role=assistant")
-	assert.Contains(t, compressed, "finish_reason=stop")
 }
 
 func TestResponseCodebook_UnknownField(t *testing.T) {
