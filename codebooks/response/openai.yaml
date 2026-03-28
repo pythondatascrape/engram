@@ -1,0 +1,20 @@
+name: openai_response
+version: 1
+dimensions:
+  - name: role
+    type: enum
+    values: [assistant]
+  - name: finish_reason
+    type: enum
+    values: [stop, length, tool_calls, content_filter, function_call]
+  - name: model
+    type: enum
+    values: [gpt-4o, gpt-4o-mini, gpt-4-turbo, o1, o1-mini]
+  - name: prompt_tokens
+    type: range
+    min: 0
+    max: 2000000
+  - name: completion_tokens
+    type: range
+    min: 0
+    max: 32000
