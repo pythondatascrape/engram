@@ -3,6 +3,9 @@ package server_test
 import (
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+
+	engramctx "github.com/pythondatascrape/engram/internal/context"
 	"github.com/pythondatascrape/engram/internal/server"
 )
 
@@ -70,4 +73,44 @@ func containsSubstring(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+func TestAssemblePrompt_WithContextCodebook(t *testing.T) {
+	cb, _ := engramctx.DeriveCodebook("travel", map[string]string{
+		"role": "enum:user,assistant", "content": "text",
+	})
+	result := server.AssemblePrompt(server.PromptParts{
+		Identity:           "domain=travel rank=agent",
+		ContextCodebookDef: cb.Definition(),
+		Query:              "Find flights",
+	})
+	assert.Contains(t, result, "[CONTEXT_CODEBOOK]")
+	assert.Contains(t, result, "travel:")
+	assert.Contains(t, result, "[QUERY]")
+}
+
+func TestAssemblePrompt_WithHistory(t *testing.T) {
+	cb, _ := engramctx.DeriveCodebook("app", map[string]string{
+		"role": "text", "content": "text",
+	})
+	h := engramctx.NewHistory()
+	h.Append(cb, map[string]string{"role": "user", "content": "prior turn"}, "role=assistant content=ok")
+
+	result := server.AssemblePrompt(server.PromptParts{
+		Identity: "domain=travel",
+		History:  h,
+		Query:    "Next question",
+	})
+	assert.Contains(t, result, "[HISTORY]")
+	assert.Contains(t, result, "role=user")
+}
+
+func TestAssemblePrompt_NoHistoryNoCodebook(t *testing.T) {
+	// Existing behavior unchanged when no history/codebook provided
+	result := server.AssemblePrompt(server.PromptParts{
+		Identity: "domain=fire rank=captain",
+		Query:    "egress?",
+	})
+	assert.NotContains(t, result, "[CONTEXT_CODEBOOK]")
+	assert.NotContains(t, result, "[HISTORY]")
 }
