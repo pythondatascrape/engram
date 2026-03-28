@@ -8,6 +8,7 @@ import (
 	"time"
 
 	engramErrors "github.com/pythondatascrape/engram/internal/errors"
+	engramctx "github.com/pythondatascrape/engram/internal/context"
 )
 
 // Status represents the lifecycle state of a session.
@@ -42,6 +43,8 @@ type Session struct {
 	TokensSent         int
 	TokensSaved        int
 	IdentityTokens     int
+	History            *engramctx.History
+	ContextCodebook    *engramctx.ContextCodebook
 }
 
 // generateID produces a 32-char hex session identifier using crypto/rand.
@@ -84,6 +87,20 @@ func (s *Session) SetIdentity(serialized string) {
 	s.SerializedIdentity = serialized
 }
 
+// SetContextCodebook stores the derived context codebook on the session.
+func (s *Session) SetContextCodebook(cb *engramctx.ContextCodebook) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.ContextCodebook = cb
+}
+
+// SetHistory stores the conversation history on the session.
+func (s *Session) SetHistory(h *engramctx.History) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.History = h
+}
+
 // RecordTurn increments the turn counter and accumulates token counts directly.
 func (s *Session) RecordTurn(tokensSent, tokensSaved int) {
 	s.mu.Lock()
@@ -106,6 +123,8 @@ type RequestContext struct {
 	ID                 string
 	SerializedIdentity string
 	Model              string
+	History            *engramctx.History
+	ContextCodebook    *engramctx.ContextCodebook
 }
 
 // RequestCtx returns a lightweight snapshot for prompt assembly.
@@ -116,6 +135,8 @@ func (s *Session) RequestCtx() RequestContext {
 		ID:                 s.ID,
 		SerializedIdentity: s.SerializedIdentity,
 		Model:              s.Opts.Model,
+		History:            s.History,
+		ContextCodebook:    s.ContextCodebook,
 	}
 }
 
@@ -135,5 +156,7 @@ func (s *Session) Snapshot() Session {
 		TokensSent:         s.TokensSent,
 		TokensSaved:        s.TokensSaved,
 		IdentityTokens:     s.IdentityTokens,
+		History:            s.History,
+		ContextCodebook:    s.ContextCodebook,
 	}
 }
