@@ -1,41 +1,56 @@
 package server
 
-import "strings"
+import (
+	"strings"
+
+	engramctx "github.com/pythondatascrape/engram/internal/context"
+)
 
 // PromptParts holds the components of a structured prompt.
 type PromptParts struct {
-	Identity  string
-	Knowledge string
-	Query     string
+	Identity            string
+	Knowledge           string
+	ContextCodebookDef  string             // optional — injected as [CONTEXT_CODEBOOK] block
+	ResponseCodebookDef string             // optional — injected as [RESPONSE_CODEBOOK] block
+	History             *engramctx.History // optional — injected as [HISTORY] block
+	Query               string
 }
 
-// AssemblePrompt creates the structured system prompt with delimiters.
-// The assembled prompt uses clear structural delimiters to help the LLM
-// distinguish between identity context, knowledge, and user input.
-//
-// If Knowledge is empty, the [KNOWLEDGE] section is omitted entirely.
-//
-// Example output:
-//
-//	[IDENTITY]
-//	domain=fire rank=captain experience=20
-//
-//	[KNOWLEDGE]
-//	Fire code Section 4.2: All commercial buildings require...
-//
-//	[QUERY]
-//	What are the egress requirements?
+// AssemblePrompt creates the structured system prompt with [IDENTITY],
+// optional [KNOWLEDGE], [CONTEXT_CODEBOOK], [RESPONSE_CODEBOOK], [HISTORY], and [QUERY] delimiters.
 func AssemblePrompt(parts PromptParts) string {
 	var b strings.Builder
 
 	b.WriteString("[IDENTITY]\n")
 	b.WriteString(parts.Identity)
-	b.WriteString("\n")
+	b.WriteByte('\n')
 
 	if parts.Knowledge != "" {
 		b.WriteString("\n[KNOWLEDGE]\n")
 		b.WriteString(parts.Knowledge)
-		b.WriteString("\n")
+		b.WriteByte('\n')
+	}
+
+	if parts.ContextCodebookDef != "" {
+		b.WriteString("\n[CONTEXT_CODEBOOK]\n")
+		b.WriteString(parts.ContextCodebookDef)
+		b.WriteByte('\n')
+	}
+
+	if parts.ResponseCodebookDef != "" {
+		b.WriteString("\n[RESPONSE_CODEBOOK]\n")
+		b.WriteString(parts.ResponseCodebookDef)
+		b.WriteByte('\n')
+	}
+
+	if parts.History != nil && parts.History.Len() > 0 {
+		b.WriteString("\n[HISTORY]\n")
+		for _, msg := range parts.History.Messages() {
+			b.WriteString(msg.Role)
+			b.WriteString(": ")
+			b.WriteString(msg.Content)
+			b.WriteByte('\n')
+		}
 	}
 
 	b.WriteString("\n[QUERY]\n")

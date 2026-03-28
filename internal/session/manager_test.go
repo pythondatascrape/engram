@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	engramErrors "github.com/pythondatascrape/engram/internal/errors"
+	engramctx "github.com/pythondatascrape/engram/internal/context"
 	"github.com/pythondatascrape/engram/internal/session"
 )
 
@@ -174,4 +175,102 @@ func TestEvictAll(t *testing.T) {
 	evicted := m.EvictAll()
 	assert.Len(t, evicted, 2)
 	assert.Equal(t, 0, m.Count())
+}
+
+func TestTouch(t *testing.T) {
+	m := session.NewManager(defaultConfig())
+	ctx := context.Background()
+
+	s, err := m.Create(ctx, "client-1", defaultOpts())
+	require.NoError(t, err)
+
+	before := s.Snapshot().LastActivity
+	time.Sleep(2 * time.Millisecond)
+	s.Touch()
+	after := s.Snapshot().LastActivity
+
+	assert.True(t, after.After(before), "Touch should advance LastActivity")
+}
+
+func TestCheckOwnershipNonexistent(t *testing.T) {
+	m := session.NewManager(defaultConfig())
+
+	err := m.CheckOwnership("bogus", "client-1")
+	require.Error(t, err)
+	assert.Equal(t, engramErrors.SESSION_NOT_FOUND, err)
+}
+
+func TestSetIdentityNonexistent(t *testing.T) {
+	m := session.NewManager(defaultConfig())
+
+	err := m.SetIdentity("bogus", "data")
+	require.Error(t, err)
+	assert.Equal(t, engramErrors.SESSION_NOT_FOUND, err)
+}
+
+func TestRecordTurnNonexistent(t *testing.T) {
+	m := session.NewManager(defaultConfig())
+
+	err := m.RecordTurn("bogus", 100, 50)
+	require.Error(t, err)
+	assert.Equal(t, engramErrors.SESSION_NOT_FOUND, err)
+}
+
+func TestCloseNonexistent(t *testing.T) {
+	m := session.NewManager(defaultConfig())
+
+	_, err := m.Close("bogus")
+	require.Error(t, err)
+	assert.Equal(t, engramErrors.SESSION_NOT_FOUND, err)
+}
+
+func TestEvictIdleByMaxTTL(t *testing.T) {
+	cfg := session.ManagerConfig{
+		IdleTimeout: 1 * time.Hour,
+		MaxTTL:      1 * time.Millisecond,
+		MaxSessions: 100,
+	}
+	m := session.NewManager(cfg)
+	ctx := context.Background()
+
+	s, err := m.Create(ctx, "client-1", defaultOpts())
+	require.NoError(t, err)
+
+	time.Sleep(5 * time.Millisecond)
+
+	evicted := m.EvictIdle()
+	assert.Contains(t, evicted, s.ID)
+	assert.Equal(t, 0, m.Count())
+}
+
+func TestEvictIdleKeepsActive(t *testing.T) {
+	cfg := session.ManagerConfig{
+		IdleTimeout: 1 * time.Hour,
+		MaxTTL:      1 * time.Hour,
+		MaxSessions: 100,
+	}
+	m := session.NewManager(cfg)
+	ctx := context.Background()
+
+	_, err := m.Create(ctx, "client-1", defaultOpts())
+	require.NoError(t, err)
+
+	evicted := m.EvictIdle()
+	assert.Empty(t, evicted)
+	assert.Equal(t, 1, m.Count())
+}
+
+func TestSession_HistoryIntegration(t *testing.T) {
+	ctx := context.Background()
+	m := session.NewManager(session.ManagerConfig{MaxSessions: 10})
+	s, err := m.Create(ctx, "client-1", session.Opts{})
+	require.NoError(t, err)
+
+	cb, _ := engramctx.DeriveCodebook("app", map[string]string{"role": "text", "content": "text"})
+	s.SetContextCodebook(cb)
+	s.SetHistory(engramctx.NewHistory())
+
+	snap := s.Snapshot()
+	assert.NotNil(t, snap.History)
+	assert.NotNil(t, snap.ContextCodebook)
 }

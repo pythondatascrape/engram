@@ -36,3 +36,15 @@ api.txt
 docs/
 
 CLAUDE.md
+
+# Worktrees
+.worktrees/
+
+# Autoresearch plugin
+.claude/skills/autoresearch/
+.claude/commands/autoresearch/
+.claude/commands/autoresearch.md
+autoresearch-results.tsv
+autoresearch-perf-results.tsv
+autoresearch-loc-results.tsv
+/security/

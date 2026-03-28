@@ -2,25 +2,30 @@ package server
 
 import (
 	"context"
+	"fmt"
+	"log/slog"
 	"strings"
-	"unicode/utf8"
 
 	engramErrors "github.com/pythondatascrape/engram/internal/errors"
 	"github.com/pythondatascrape/engram/internal/identity/codebook"
 	"github.com/pythondatascrape/engram/internal/identity/serializer"
 	"github.com/pythondatascrape/engram/internal/provider"
 	"github.com/pythondatascrape/engram/internal/provider/pool"
+	"github.com/pythondatascrape/engram/internal/security"
 	"github.com/pythondatascrape/engram/internal/session"
+
+	engramctx "github.com/pythondatascrape/engram/internal/context"
 )
 
 // IncomingRequest holds all fields sent by the client for a single turn.
 type IncomingRequest struct {
-	ClientID  string
-	APIKey    string
-	SessionID string
-	Query     string
-	Identity  map[string]string
-	Opts      session.Opts
+	ClientID      string
+	APIKey        string
+	SessionID     string
+	Query         string
+	Identity      map[string]string
+	ContextSchema map[string]string // optional — field name → type hint for context codebook
+	Opts          session.Opts
 }
 
 // Response is the result returned to the caller after a turn is processed.
@@ -30,6 +35,12 @@ type Response struct {
 	TotalTokens int
 }
 
+const (
+	maxQueryBytes    = 32 * 1024   // 32 KB
+	maxIdentityBytes = 4 * 1024    // 4 KB total across all k/v pairs
+	maxResponseBytes = 1024 * 1024 // 1 MB
+)
+
 // Handler orchestrates identity serialization, session management, prompt
 // assembly, and LLM provider calls for a single request.
 type Handler struct {
@@ -37,6 +48,7 @@ type Handler struct {
 	serializer *serializer.Serializer
 	codebook   *codebook.Codebook
 	pool       *pool.Pool
+	detector   *security.InjectionDetector
 }
 
 // NewHandler constructs a Handler with its dependencies.
@@ -54,71 +66,126 @@ func NewHandler(
 	}
 }
 
-// HandleRequest processes one client turn end-to-end:
-//  1. First request (no SessionID): validate identity, create session, serialize identity.
-//  2. Subsequent request (SessionID present): look up session, verify ownership.
-//  3. Assemble prompt from identity + query.
-//  4. Acquire a provider connection from the pool.
-//  5. Stream the LLM response and collect full text.
-//  6. Record the turn on the session.
-//  7. Return the connection to the pool.
+// NewHandlerWithSecurity constructs a Handler with an injection detector.
+func NewHandlerWithSecurity(
+	sessions *session.Manager,
+	ser *serializer.Serializer,
+	cb *codebook.Codebook,
+	p *pool.Pool,
+	det *security.InjectionDetector,
+) *Handler {
+	return &Handler{
+		sessions:   sessions,
+		serializer: ser,
+		codebook:   cb,
+		pool:       p,
+		detector:   det,
+	}
+}
+
+// Handle is an alias for HandleRequest.
+func (h *Handler) Handle(ctx context.Context, req IncomingRequest) (Response, error) {
+	return h.HandleRequest(ctx, req)
+}
+
+// HandleRequest processes one client turn: resolve/create session, assemble
+// prompt, call the LLM provider, and record the turn.
 func (h *Handler) HandleRequest(ctx context.Context, req IncomingRequest) (Response, error) {
+	if len(req.Query) > maxQueryBytes {
+		return Response{}, fmt.Errorf("query exceeds maximum size of %d bytes", maxQueryBytes)
+	}
+	if req.Identity != nil {
+		total := 0
+		for k, v := range req.Identity {
+			total += len(k) + len(v)
+		}
+		if total > maxIdentityBytes {
+			return Response{}, fmt.Errorf("identity exceeds maximum size of %d bytes", maxIdentityBytes)
+		}
+	}
+
+	if h.detector != nil {
+		if result := h.detector.Check(req.Query); result.Detected {
+			slog.Warn("injection detected", "client_id", req.ClientID, "pattern", result.Pattern, "source", "query")
+			return Response{}, engramErrors.INJECTION_DETECTED
+		}
+		if req.Identity != nil {
+			if result := h.detector.CheckIdentityValues(req.Identity); result.Detected {
+				slog.Warn("injection detected", "client_id", req.ClientID, "pattern", result.Pattern, "source", "identity")
+				return Response{}, engramErrors.INJECTION_DETECTED
+			}
+		}
+	}
+
+	slog.Debug("request received", "client_id", req.ClientID, "has_session", req.SessionID != "")
+
 	var sess *session.Session
 
 	if req.SessionID == "" {
-		// First request — identity is mandatory.
 		if len(req.Identity) == 0 {
 			return Response{}, engramErrors.IDENTITY_REQUIRED
 		}
-
-		// Create a new session.
 		s, err := h.sessions.Create(ctx, req.ClientID, req.Opts)
 		if err != nil {
 			return Response{}, err
 		}
-
-		// Serialize and store the identity.
 		serialized, err := h.serializer.Serialize(h.codebook, req.Identity)
 		if err != nil {
 			return Response{}, err
 		}
-		if err := h.sessions.SetIdentity(s.ID, serialized); err != nil {
-			return Response{}, err
+		s.SetIdentity(serialized)
+		if len(req.ContextSchema) > 0 {
+			ctxCB, err := engramctx.DeriveCodebook(req.ClientID, req.ContextSchema)
+			if err != nil {
+				return Response{}, fmt.Errorf("context codebook: %w", err)
+			}
+			s.SetContextCodebook(ctxCB)
+			s.SetHistory(engramctx.NewHistory())
 		}
-
+		slog.Info("session created", "session_id", s.ID, "client_id", req.ClientID)
 		sess = s
 	} else {
-		// Subsequent request — look up and verify ownership.
 		s, err := h.sessions.Get(req.SessionID)
 		if err != nil {
 			return Response{}, err
 		}
-		if err := h.sessions.CheckOwnership(req.SessionID, req.ClientID); err != nil {
+		if err := s.CheckOwnership(req.ClientID); err != nil {
 			return Response{}, err
 		}
 		sess = s
 	}
 
-	// Snapshot the session to safely read SerializedIdentity.
-	snap := sess.Snapshot()
+	rctx := sess.RequestCtx()
 
-	// Assemble the structured prompt.
+	var ctxCodebookDef, respCodebookDef string
+	if rctx.ContextCodebook != nil {
+		ctxCodebookDef = rctx.ContextCodebook.Definition()
+		respCodebookDef = engramctx.AnthropicResponseCodebook().Definition()
+	}
+
 	prompt := AssemblePrompt(PromptParts{
-		Identity: snap.SerializedIdentity,
-		Query:    req.Query,
+		Identity:            rctx.SerializedIdentity,
+		ContextCodebookDef:  ctxCodebookDef,
+		ResponseCodebookDef: respCodebookDef,
+		History:             rctx.History,
+		Query:               req.Query,
 	})
 
-	// Acquire a provider connection.
 	conn, err := h.pool.Get(ctx, req.APIKey)
 	if err != nil {
 		return Response{}, err
 	}
 
-	// Send to the LLM and collect streaming chunks.
+	var history []provider.Message
+	if rctx.History != nil {
+		history = rctx.History.Messages()
+	}
+
 	chunks, err := conn.Provider.Send(ctx, &provider.Request{
-		Model:        snap.Opts.Model,
-		SystemPrompt: prompt,
-		Query:        req.Query,
+		Model:               rctx.Model,
+		SystemPrompt:        prompt,
+		Query:               req.Query,
+		ConversationHistory: history,
 	})
 	if err != nil {
 		h.pool.Return(conn)
@@ -127,26 +194,42 @@ func (h *Handler) HandleRequest(ctx context.Context, req IncomingRequest) (Respo
 
 	var sb strings.Builder
 	for chunk := range chunks {
-		sb.WriteString(chunk.Text)
 		if chunk.Done {
 			break
 		}
+		if sb.Len()+len(chunk.Text) > maxResponseBytes {
+			sb.WriteString(chunk.Text[:maxResponseBytes-sb.Len()])
+			break
+		}
+		sb.WriteString(chunk.Text)
 	}
 	fullText := sb.String()
 
-	// Return the connection to the pool as soon as streaming is done.
 	h.pool.Return(conn)
 
-	// Record the turn; token counts are not available from all providers,
-	// so we pass 0 for tokensSaved and use the prompt length as a rough proxy
-	// for tokensSent when a real count is unavailable.
-	tokensSent := utf8.RuneCountInString(prompt)
-	if err := h.sessions.RecordTurn(snap.ID, tokensSent, 0); err != nil {
-		return Response{}, err
+	if rctx.ContextCodebook != nil && rctx.History != nil {
+		requestTurn := map[string]string{
+			"role":    "user",
+			"content": req.Query,
+		}
+		respCB := engramctx.AnthropicResponseCodebook()
+		compressedResp, _ := respCB.SerializeTurn(map[string]string{
+			"role":    "assistant",
+			"content": fullText,
+		})
+		if compressedResp == "" {
+			compressedResp = "role=assistant content=" + fullText
+		}
+		_ = rctx.History.Append(rctx.ContextCodebook, requestTurn, compressedResp)
 	}
 
+	tokensSent := len(prompt)
+	sess.RecordTurn(tokensSent, 0)
+
+	slog.Debug("request completed", "session_id", rctx.ID, "tokens_sent", tokensSent)
+
 	return Response{
-		SessionID:   snap.ID,
+		SessionID:   rctx.ID,
 		FullText:    fullText,
 		TotalTokens: tokensSent,
 	}, nil

@@ -1,10 +1,10 @@
-// Package pool manages a keyed set of provider connections.
-// Each API key gets its own sub-pool so that connections are never
-// shared across tenants.
+// Package pool manages a keyed set of provider connections per API key.
 package pool
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"sync"
 
@@ -13,16 +13,13 @@ import (
 
 // Config controls pool-wide limits.
 type Config struct {
-	// MaxConnections is the maximum number of live provider connections
-	// that may exist for a single API key at one time.
 	MaxConnections int
 }
 
-// Factory is the function used to create a new provider connection.
+// Factory creates a new provider connection for the given API key.
 type Factory func(apiKey string) (provider.Provider, error)
 
-// Conn wraps a provider together with the pool key so that Return knows
-// which sub-pool to put it back into.
+// Conn wraps a provider with the pool key for return routing.
 type Conn struct {
 	Provider provider.Provider
 	key      string
@@ -36,13 +33,11 @@ type Stats struct {
 	MaxConns  int
 }
 
-// subPool tracks the connections for one API key.
 type subPool struct {
 	available []*Conn
 	active    int
 	maxConns  int
-	// waiters is notified each time a connection is returned.
-	waiters []chan struct{}
+	waiters   []chan struct{}
 }
 
 // Pool is a concurrency-safe connection pool keyed by API key.
@@ -65,8 +60,13 @@ func New(cfg Config, factory Factory) *Pool {
 	}
 }
 
-// getOrCreateSubPool returns the sub-pool for key, creating it if needed.
-// Caller must hold p.mu.
+// hashKey returns a hex-encoded truncated SHA-256 of apiKey for safe map indexing.
+func hashKey(apiKey string) string {
+	h := sha256.Sum256([]byte(apiKey))
+	return hex.EncodeToString(h[:16])
+}
+
+// getOrCreateSubPool returns the sub-pool for key, creating if needed. Caller must hold p.mu.
 func (p *Pool) getOrCreateSubPool(key string) *subPool {
 	sp, ok := p.pools[key]
 	if !ok {
@@ -76,16 +76,14 @@ func (p *Pool) getOrCreateSubPool(key string) *subPool {
 	return sp
 }
 
-// Get returns a connection for apiKey.  If a connection is available it is
-// returned immediately.  If the pool is under its limit a new connection is
-// created via the factory.  Otherwise Get blocks until a connection is
-// returned or ctx is cancelled.
+// Get returns a connection for apiKey, reusing idle connections, creating new
+// ones under the limit, or blocking until one is returned or ctx is cancelled.
 func (p *Pool) Get(ctx context.Context, apiKey string) (*Conn, error) {
+	hk := hashKey(apiKey)
 	for {
 		p.mu.Lock()
-		sp := p.getOrCreateSubPool(apiKey)
+		sp := p.getOrCreateSubPool(hk)
 
-		// Return an idle connection if one exists.
 		if len(sp.available) > 0 {
 			conn := sp.available[len(sp.available)-1]
 			sp.available = sp.available[:len(sp.available)-1]
@@ -94,32 +92,28 @@ func (p *Pool) Get(ctx context.Context, apiKey string) (*Conn, error) {
 			return conn, nil
 		}
 
-		// Create a new connection if under the limit.
 		if sp.active < sp.maxConns {
 			sp.active++
 			p.mu.Unlock()
 
 			prov, err := p.factory(apiKey)
 			if err != nil {
-				// Roll back the active count.
 				p.mu.Lock()
 				sp.active--
 				p.mu.Unlock()
-				return nil, fmt.Errorf("pool: factory error for key %q: %w", apiKey, err)
+				return nil, fmt.Errorf("pool: factory error for key %q: %w", hk, err)
 			}
-			return &Conn{Provider: prov, key: apiKey}, nil
+			return &Conn{Provider: prov, key: hk}, nil
 		}
 
-		// Pool is exhausted — register a waiter channel and block.
 		wait := make(chan struct{}, 1)
 		sp.waiters = append(sp.waiters, wait)
 		p.mu.Unlock()
 
 		select {
 		case <-ctx.Done():
-			// Remove our waiter so it is not notified after we leave.
 			p.mu.Lock()
-			sp2 := p.pools[apiKey]
+			sp2 := p.pools[hk]
 			if sp2 != nil {
 				for i, w := range sp2.waiters {
 					if w == wait {
@@ -132,7 +126,6 @@ func (p *Pool) Get(ctx context.Context, apiKey string) (*Conn, error) {
 			return nil, fmt.Errorf("pool: context cancelled while waiting for connection: %w", ctx.Err())
 
 		case <-wait:
-			// A connection was returned; loop back and try again.
 		}
 	}
 }
@@ -147,14 +140,12 @@ func (p *Pool) Return(conn *Conn) {
 
 	sp, ok := p.pools[conn.key]
 	if !ok {
-		// Sub-pool was somehow removed; just discard.
 		return
 	}
 
 	sp.active--
 	sp.available = append(sp.available, conn)
 
-	// Wake the oldest waiter, if any.
 	if len(sp.waiters) > 0 {
 		w := sp.waiters[0]
 		sp.waiters = sp.waiters[1:]

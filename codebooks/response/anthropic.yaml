@@ -1,0 +1,20 @@
+name: anthropic_response
+version: 1
+dimensions:
+  - name: role
+    type: enum
+    values: [assistant]
+  - name: stop_reason
+    type: enum
+    values: [end_turn, max_tokens, stop_sequence, tool_use]
+  - name: model
+    type: enum
+    values: [claude-opus-4-6, claude-sonnet-4-6, claude-haiku-4-5-20251001]
+  - name: input_tokens
+    type: range
+    min: 0
+    max: 2000000
+  - name: output_tokens
+    type: range
+    min: 0
+    max: 32000

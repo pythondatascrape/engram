@@ -3,18 +3,19 @@ package security
 import (
 	"regexp"
 	"strings"
+
+	"golang.org/x/text/unicode/norm"
 )
 
 // DetectorConfig configures the injection detector.
 type DetectorConfig struct {
-	// Mode is either "strict" or "permissive".
-	Mode string
+	Mode string // "strict" or "permissive"
 }
 
 // DetectionResult holds the outcome of an injection scan.
 type DetectionResult struct {
 	Detected bool
-	Pattern  string // name of the matched pattern, empty if none
+	Pattern  string
 }
 
 type injectionPattern struct {
@@ -53,25 +54,33 @@ func NewInjectionDetector(cfg DetectorConfig) *InjectionDetector {
 	return &InjectionDetector{cfg: cfg, patterns: patterns}
 }
 
+// normalize strips zero-width characters and applies NFKC normalization
+// to defeat Unicode-based pattern bypass attempts.
+func normalize(s string) string {
+	r := strings.NewReplacer(
+		"\u200B", " ", "\u200C", " ", "\u200D", " ",
+		"\u200E", " ", "\u200F", " ", "\uFEFF", " ",
+	)
+	return norm.NFKC.String(r.Replace(s))
+}
+
 // Check scans input against all patterns and returns the first match.
 func (d *InjectionDetector) Check(input string) DetectionResult {
+	normalized := normalize(input)
 	for _, p := range d.patterns {
-		if p.pattern.MatchString(input) {
+		if p.pattern.MatchString(normalized) {
 			return DetectionResult{Detected: true, Pattern: p.name}
 		}
 	}
 	return DetectionResult{}
 }
 
-// CheckIdentityValues checks each value in the identity map for newlines,
-// delimiter strings, and injection patterns.
+// CheckIdentityValues checks each identity value for injection patterns and newlines.
 func (d *InjectionDetector) CheckIdentityValues(identity map[string]string) DetectionResult {
 	for _, v := range identity {
-		// Newline injection check.
 		if strings.ContainsAny(v, "\n\r") {
 			return DetectionResult{Detected: true, Pattern: "newline_injection"}
 		}
-		// Run all compiled patterns against the value.
 		if result := d.Check(v); result.Detected {
 			return result
 		}

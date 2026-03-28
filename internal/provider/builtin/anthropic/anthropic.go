@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -23,11 +24,23 @@ const (
 type Option func(*Provider)
 
 // WithBaseURL overrides the default Anthropic API base URL.
-func WithBaseURL(url string) Option {
+// Only HTTPS URLs are accepted; HTTP is allowed only for loopback addresses (testing).
+func WithBaseURL(rawURL string) Option {
 	return func(p *Provider) {
-		p.baseURL = url
+		u, err := url.Parse(rawURL)
+		if err != nil {
+			return
+		}
+		if u.Scheme == "https" {
+			p.baseURL = rawURL
+		} else if u.Scheme == "http" && (u.Hostname() == "127.0.0.1" || u.Hostname() == "localhost" || u.Hostname() == "::1") {
+			p.baseURL = rawURL
+		}
 	}
 }
+
+// BaseURL returns the configured base URL.
+func (p *Provider) BaseURL() string { return p.baseURL }
 
 // Provider is the built-in Anthropic provider.
 type Provider struct {
@@ -83,18 +96,16 @@ func (p *Provider) Healthcheck(ctx context.Context) error {
 	return nil
 }
 
-// Close releases provider resources (no-op for Anthropic).
+// Close is a no-op for Anthropic.
 func (p *Provider) Close() error {
 	return nil
 }
 
-// anthropicMessage is a single turn in the Anthropic Messages API format.
 type anthropicMessage struct {
 	Role    string `json:"role"`
 	Content string `json:"content"`
 }
 
-// anthropicRequest is the JSON body sent to /v1/messages.
 type anthropicRequest struct {
 	Model     string             `json:"model"`
 	MaxTokens int                `json:"max_tokens"`
@@ -103,7 +114,6 @@ type anthropicRequest struct {
 	Stream    bool               `json:"stream"`
 }
 
-// sseEvent represents a parsed SSE event.
 type sseEvent struct {
 	Type  string          `json:"type"`
 	Delta *sseDelta       `json:"delta,omitempty"`
@@ -117,7 +127,6 @@ type sseDelta struct {
 
 // Send submits the request to the Anthropic Messages API and returns a streaming channel.
 func (p *Provider) Send(ctx context.Context, req *provider.Request) (<-chan provider.Chunk, error) {
-	// Build messages list from history + current query.
 	msgs := make([]anthropicMessage, 0, len(req.ConversationHistory)+1)
 	for _, m := range req.ConversationHistory {
 		msgs = append(msgs, anthropicMessage{Role: m.Role, Content: m.Content})
@@ -196,7 +205,6 @@ func (p *Provider) Send(ctx context.Context, req *provider.Request) (<-chan prov
 			}
 		}
 
-		// If scanner ends without message_stop, send Done anyway.
 		select {
 		case ch <- provider.Chunk{Done: true}:
 		case <-ctx.Done():

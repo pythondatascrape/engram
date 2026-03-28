@@ -1,6 +1,8 @@
 package events_test
 
 import (
+	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -75,6 +77,65 @@ func TestUnsubscribe(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for channel close")
 	}
+}
+
+func TestPublishToNonExistentClient(t *testing.T) {
+	bus := events.NewBus()
+	// Should not panic — event is silently dropped.
+	bus.Publish(makeEvent("test.event"), "nobody")
+}
+
+func TestResubscribe(t *testing.T) {
+	bus := events.NewBus()
+
+	// First subscription.
+	ch1 := bus.Subscribe("client-re", []string{"a"})
+
+	// Re-subscribing should close the old channel.
+	ch2 := bus.Subscribe("client-re", []string{"b"})
+
+	// Old channel should be closed.
+	select {
+	case _, ok := <-ch1:
+		if ok {
+			t.Fatal("expected old channel to be closed after re-subscribe")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for old channel close")
+	}
+
+	// New channel should work.
+	bus.Publish(makeEvent("b"), "client-re")
+	select {
+	case received := <-ch2:
+		if received.Type != "b" {
+			t.Fatalf("expected type b, got %s", received.Type)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for event on new channel")
+	}
+}
+
+func TestBroadcastDuringUnsubscribe_NoPanic(t *testing.T) {
+	bus := events.NewBus()
+	for i := 0; i < 100; i++ {
+		bus.Subscribe(fmt.Sprintf("client-%d", i), nil)
+	}
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 1000; i++ {
+			bus.Broadcast(makeEvent("test.event"))
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 100; i++ {
+			bus.Unsubscribe(fmt.Sprintf("client-%d", i))
+		}
+	}()
+	wg.Wait()
 }
 
 func TestBroadcast(t *testing.T) {

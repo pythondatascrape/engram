@@ -132,6 +132,16 @@ server:
 	assert.Contains(t, err.Error(), "port")
 }
 
+func TestLoad_InvalidYAML_ReturnsError(t *testing.T) {
+	path := writeTempYAML(t, `
+server:
+  port: [[[this is not valid yaml
+`)
+	_, err := config.Load(path)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "parse error")
+}
+
 func TestParseSize(t *testing.T) {
 	tests := []struct {
 		input    string
@@ -145,6 +155,8 @@ func TestParseSize(t *testing.T) {
 		{"128MB", 128 * 1024 * 1024, false},
 		{"invalid", 0, true},
 		{"", 0, true},
+		{"abcMB", 0, true},
+		{"  4KB  ", 4 * 1024, false},
 	}
 
 	for _, tt := range tests {

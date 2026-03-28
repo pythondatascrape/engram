@@ -31,8 +31,7 @@ func NewBus() *Bus {
 	}
 }
 
-// Subscribe registers clientID and returns a channel on which the client will
-// receive events. Pass nil (or empty) types to receive all event types.
+// Subscribe registers clientID and returns an event channel. Pass nil types to receive all.
 func (b *Bus) Subscribe(clientID string, types []string) <-chan Event {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -45,7 +44,6 @@ func (b *Bus) Subscribe(clientID string, types []string) <-chan Event {
 		}
 	}
 
-	// Close existing subscriber channel to prevent leak.
 	if old, ok := b.subscribers[clientID]; ok {
 		close(old.ch)
 	}
@@ -69,13 +67,12 @@ func (b *Bus) Unsubscribe(clientID string) {
 	}
 }
 
-// Publish sends evt to the specific client. The event is dropped (non-blocking)
-// if the client's buffer is full or the type is filtered out.
+// Publish sends evt to a specific client (non-blocking, drops if buffer full).
 func (b *Bus) Publish(evt Event, clientID string) {
 	b.mu.RLock()
-	sub, ok := b.subscribers[clientID]
-	b.mu.RUnlock()
+	defer b.mu.RUnlock()
 
+	sub, ok := b.subscribers[clientID]
 	if !ok {
 		return
 	}
@@ -83,28 +80,26 @@ func (b *Bus) Publish(evt Event, clientID string) {
 }
 
 // Broadcast sends evt to every subscriber, respecting per-subscriber filters.
+// Delivery happens under RLock so that Unsubscribe (which requires the write
+// lock) cannot close a channel while we are sending to it.
 func (b *Bus) Broadcast(evt Event) {
 	b.mu.RLock()
-	subs := make([]*subscriber, 0, len(b.subscribers))
-	for _, sub := range b.subscribers {
-		subs = append(subs, sub)
-	}
-	b.mu.RUnlock()
+	defer b.mu.RUnlock()
 
-	for _, sub := range subs {
+	for _, sub := range b.subscribers {
 		deliver(sub, evt)
 	}
 }
 
-// deliver sends an event to a subscriber, dropping it if the buffer is full or
-// the event type is filtered out.
+// deliver sends an event to a subscriber, dropping if filtered or buffer full.
+// A recover guards against any residual send-on-closed-channel panic.
 func deliver(sub *subscriber, evt Event) {
 	if sub.filters != nil && !sub.filters[evt.Type] {
 		return
 	}
+	defer func() { recover() }()
 	select {
 	case sub.ch <- evt:
 	default:
-		// buffer full — drop event
 	}
 }

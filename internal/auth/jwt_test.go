@@ -3,10 +3,13 @@ package auth_test
 import (
 	"crypto/ed25519"
 	"crypto/rand"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/pythondatascrape/engram/internal/auth"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func generateKeys(t *testing.T) (ed25519.PrivateKey, ed25519.PublicKey) {
@@ -78,11 +81,17 @@ func TestTamperedToken(t *testing.T) {
 		t.Fatalf("Issue() error: %v", err)
 	}
 
-	// Tamper: flip last character of the signature
-	tampered := token[:len(token)-1] + "X"
-	if tampered[len(tampered)-1] == token[len(token)-1] {
-		tampered = token[:len(token)-1] + "Y"
+	// Tamper: corrupt the middle of the signature to reliably break verification.
+	// Flipping only the last char is unreliable because base64 padding bits
+	// may not affect the decoded byte value.
+	parts := strings.Split(token, ".")
+	sig := parts[2]
+	mid := len(sig) / 2
+	replacement := byte('A')
+	if sig[mid] == 'A' {
+		replacement = 'B'
 	}
+	tampered := parts[0] + "." + parts[1] + "." + sig[:mid] + string(replacement) + sig[mid+1:]
 
 	_, err = issuer.Validate(tampered)
 	if err == nil {
@@ -121,4 +130,94 @@ func TestIssueNoProviders(t *testing.T) {
 	if len(claims.Providers) != 0 {
 		t.Errorf("Providers = %v, want empty", claims.Providers)
 	}
+}
+
+func TestBadSignatureEncoding(t *testing.T) {
+	priv, pub := generateKeys(t)
+	issuer := auth.NewJWTIssuer(priv, pub, 5*time.Minute)
+
+	token, err := issuer.Issue("client-id", nil)
+	if err != nil {
+		t.Fatalf("Issue() error: %v", err)
+	}
+
+	// Replace signature with invalid base64 characters.
+	parts := strings.Split(token, ".")
+	badToken := parts[0] + "." + parts[1] + ".!!!invalid-base64!!!"
+
+	_, err = issuer.Validate(badToken)
+	if err == nil {
+		t.Fatal("Validate() should return error for bad signature encoding")
+	}
+}
+
+func TestIssueWithRole(t *testing.T) {
+	priv, pub := generateKeys(t)
+	issuer := auth.NewJWTIssuer(priv, pub, 5*time.Minute)
+
+	token, err := issuer.Issue("client-id", []string{"anthropic"})
+	if err != nil {
+		t.Fatalf("Issue() error: %v", err)
+	}
+
+	claims, err := issuer.Validate(token)
+	if err != nil {
+		t.Fatalf("Validate() error: %v", err)
+	}
+	// Role should be empty by default since Issue doesn't set it.
+	if claims.Role != "" {
+		t.Errorf("expected empty Role, got %q", claims.Role)
+	}
+}
+
+func TestValidateEmptyToken(t *testing.T) {
+	priv, pub := generateKeys(t)
+	issuer := auth.NewJWTIssuer(priv, pub, 5*time.Minute)
+
+	_, err := issuer.Validate("")
+	if err == nil {
+		t.Fatal("Validate() should return error for empty token")
+	}
+}
+
+func TestIssueAndValidateWithIssuerAudience(t *testing.T) {
+	priv, pub := generateKeys(t)
+	issuer := auth.NewJWTIssuerWithIdentity(priv, pub, 5*time.Minute, "engram-prod", "api.engram.io")
+
+	token, err := issuer.Issue("client-123", nil)
+	require.NoError(t, err)
+
+	claims, err := issuer.Validate(token)
+	require.NoError(t, err)
+	assert.Equal(t, "engram-prod", claims.Issuer)
+	assert.Equal(t, "api.engram.io", claims.Audience)
+}
+
+func TestValidateRejectsWrongIssuer(t *testing.T) {
+	priv, pub := generateKeys(t)
+	issuerA := auth.NewJWTIssuerWithIdentity(priv, pub, 5*time.Minute, "staging", "api.engram.io")
+	issuerB := auth.NewJWTIssuerWithIdentity(priv, pub, 5*time.Minute, "production", "api.engram.io")
+
+	token, err := issuerA.Issue("client-123", nil)
+	require.NoError(t, err)
+
+	_, err = issuerB.Validate(token)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "issuer mismatch")
+}
+
+func TestValidateWithRevocationCheck(t *testing.T) {
+	priv, pub := generateKeys(t)
+	revokedTokens := map[string]bool{}
+	issuer := auth.NewJWTIssuer(priv, pub, 5*time.Minute)
+	issuer.SetRevocationCheck(func(claims *auth.Claims) bool {
+		return revokedTokens[claims.ClientID]
+	})
+	token, _ := issuer.Issue("client-revoked", nil)
+	_, err := issuer.Validate(token)
+	require.NoError(t, err)
+	revokedTokens["client-revoked"] = true
+	_, err = issuer.Validate(token)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "revoked")
 }
