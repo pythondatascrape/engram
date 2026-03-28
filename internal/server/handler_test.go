@@ -284,6 +284,60 @@ func TestHandleRequest_ResponseSizeCapped(t *testing.T) {
 	assert.LessOrEqual(t, len(resp.FullText), maxResponseBytes+1024)
 }
 
+func TestHandle_ContextCodebookStored(t *testing.T) {
+	ctx := context.Background()
+	mgr, ser, cb, p := newTestDeps(t)
+	h := NewHandler(mgr, ser, cb, p)
+
+	req := IncomingRequest{
+		ClientID: "client-1",
+		APIKey:   "key-1",
+		Query:    "hello",
+		Identity: map[string]string{"role": "admin", "domain": "fire"},
+		ContextSchema: map[string]string{
+			"role":    "enum:user,assistant",
+			"content": "text",
+		},
+		Opts: session.Opts{Provider: "fake", Model: "fake-model"},
+	}
+	resp, err := h.Handle(ctx, req)
+	require.NoError(t, err)
+	assert.NotEmpty(t, resp.SessionID)
+
+	sess, _ := mgr.Get(resp.SessionID)
+	snap := sess.Snapshot()
+	assert.NotNil(t, snap.ContextCodebook)
+	assert.NotNil(t, snap.History)
+}
+
+func TestHandle_HistoryGrowsAcrossTurns(t *testing.T) {
+	ctx := context.Background()
+	mgr, ser, cb, p := newTestDeps(t)
+	h := NewHandler(mgr, ser, cb, p)
+
+	first, err := h.Handle(ctx, IncomingRequest{
+		ClientID: "client-1",
+		APIKey:   "key-1",
+		Query:    "turn one",
+		Identity: map[string]string{"role": "admin", "domain": "fire"},
+		ContextSchema: map[string]string{"role": "text", "content": "text"},
+		Opts: session.Opts{Provider: "fake", Model: "fake-model"},
+	})
+	require.NoError(t, err)
+
+	_, err = h.Handle(ctx, IncomingRequest{
+		ClientID:  "client-1",
+		APIKey:    "key-1",
+		SessionID: first.SessionID,
+		Query:     "turn two",
+		Opts:      session.Opts{Provider: "fake", Model: "fake-model"},
+	})
+	require.NoError(t, err)
+
+	sess, _ := mgr.Get(first.SessionID)
+	assert.Equal(t, 2, sess.Snapshot().History.Len()) // both turns stored after completion
+}
+
 func TestHandleRequest_SessionLimitExceeded(t *testing.T) {
 	cb, err := codebook.Parse([]byte(testCodebookYAML))
 	require.NoError(t, err)
