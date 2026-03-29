@@ -3,7 +3,7 @@ package server
 import (
 	"strings"
 
-	engramctx "github.com/pythondatascrape/engram/internal/context"
+	"github.com/pythondatascrape/engram/internal/provider"
 )
 
 // PromptParts holds the components of a structured prompt.
@@ -12,7 +12,7 @@ type PromptParts struct {
 	Knowledge           string
 	ContextCodebookDef  string             // optional — injected as [CONTEXT_CODEBOOK] block
 	ResponseCodebookDef string             // optional — injected as [RESPONSE_CODEBOOK] block
-	History             *engramctx.History // optional — injected as [HISTORY] block
+	History             []provider.Message // optional — injected as [HISTORY] block
 	Query               string
 }
 
@@ -20,6 +20,14 @@ type PromptParts struct {
 // optional [KNOWLEDGE], [CONTEXT_CODEBOOK], [RESPONSE_CODEBOOK], [HISTORY], and [QUERY] delimiters.
 func AssemblePrompt(parts PromptParts) string {
 	var b strings.Builder
+
+	// Pre-allocate a rough estimate to avoid repeated Builder reallocation.
+	size := len(parts.Identity) + len(parts.Knowledge) + len(parts.ContextCodebookDef) +
+		len(parts.ResponseCodebookDef) + len(parts.Query) + 128
+	for _, m := range parts.History {
+		size += len(m.Role) + len(m.Content) + 4
+	}
+	b.Grow(size)
 
 	b.WriteString("[IDENTITY]\n")
 	b.WriteString(parts.Identity)
@@ -43,9 +51,9 @@ func AssemblePrompt(parts PromptParts) string {
 		b.WriteByte('\n')
 	}
 
-	if parts.History != nil && parts.History.Len() > 0 {
+	if len(parts.History) > 0 {
 		b.WriteString("\n[HISTORY]\n")
-		for _, msg := range parts.History.Messages() {
+		for _, msg := range parts.History {
 			b.WriteString(msg.Role)
 			b.WriteString(": ")
 			b.WriteString(msg.Content)

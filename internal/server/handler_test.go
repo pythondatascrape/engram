@@ -300,7 +300,7 @@ func TestHandle_ContextCodebookStored(t *testing.T) {
 		},
 		Opts: session.Opts{Provider: "fake", Model: "fake-model"},
 	}
-	resp, err := h.Handle(ctx, req)
+	resp, err := h.HandleRequest(ctx, req)
 	require.NoError(t, err)
 	assert.NotEmpty(t, resp.SessionID)
 
@@ -315,7 +315,7 @@ func TestHandle_HistoryGrowsAcrossTurns(t *testing.T) {
 	mgr, ser, cb, p := newTestDeps(t)
 	h := NewHandler(mgr, ser, cb, p)
 
-	first, err := h.Handle(ctx, IncomingRequest{
+	first, err := h.HandleRequest(ctx, IncomingRequest{
 		ClientID: "client-1",
 		APIKey:   "key-1",
 		Query:    "turn one",
@@ -325,7 +325,7 @@ func TestHandle_HistoryGrowsAcrossTurns(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	_, err = h.Handle(ctx, IncomingRequest{
+	_, err = h.HandleRequest(ctx, IncomingRequest{
 		ClientID:  "client-1",
 		APIKey:    "key-1",
 		SessionID: first.SessionID,

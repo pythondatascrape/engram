@@ -83,11 +83,6 @@ func NewHandlerWithSecurity(
 	}
 }
 
-// Handle is an alias for HandleRequest.
-func (h *Handler) Handle(ctx context.Context, req IncomingRequest) (Response, error) {
-	return h.HandleRequest(ctx, req)
-}
-
 // HandleRequest processes one client turn: resolve/create session, assemble
 // prompt, call the LLM provider, and record the turn.
 func (h *Handler) HandleRequest(ctx context.Context, req IncomingRequest) (Response, error) {
@@ -157,6 +152,11 @@ func (h *Handler) HandleRequest(ctx context.Context, req IncomingRequest) (Respo
 
 	rctx := sess.RequestCtx()
 
+	var histMsgs []provider.Message
+	if rctx.History != nil {
+		histMsgs = rctx.History.Messages()
+	}
+
 	var ctxCodebookDef, respCodebookDef string
 	if rctx.ContextCodebook != nil {
 		ctxCodebookDef = rctx.ContextCodebook.Definition()
@@ -167,7 +167,7 @@ func (h *Handler) HandleRequest(ctx context.Context, req IncomingRequest) (Respo
 		Identity:            rctx.SerializedIdentity,
 		ContextCodebookDef:  ctxCodebookDef,
 		ResponseCodebookDef: respCodebookDef,
-		History:             rctx.History,
+		History:             histMsgs,
 		Query:               req.Query,
 	})
 
@@ -176,16 +176,11 @@ func (h *Handler) HandleRequest(ctx context.Context, req IncomingRequest) (Respo
 		return Response{}, err
 	}
 
-	var history []provider.Message
-	if rctx.History != nil {
-		history = rctx.History.Messages()
-	}
-
 	chunks, err := conn.Provider.Send(ctx, &provider.Request{
 		Model:               rctx.Model,
 		SystemPrompt:        prompt,
 		Query:               req.Query,
-		ConversationHistory: history,
+		ConversationHistory: histMsgs,
 	})
 	if err != nil {
 		h.pool.Return(conn)
@@ -212,15 +207,7 @@ func (h *Handler) HandleRequest(ctx context.Context, req IncomingRequest) (Respo
 			"role":    "user",
 			"content": req.Query,
 		}
-		respCB := engramctx.AnthropicResponseCodebook()
-		compressedResp, _ := respCB.SerializeTurn(map[string]string{
-			"role":    "assistant",
-			"content": fullText,
-		})
-		if compressedResp == "" {
-			compressedResp = "role=assistant content=" + fullText
-		}
-		_ = rctx.History.Append(rctx.ContextCodebook, requestTurn, compressedResp)
+		_ = rctx.History.Append(rctx.ContextCodebook, requestTurn, "role=assistant content="+fullText)
 	}
 
 	tokensSent := len(prompt)
