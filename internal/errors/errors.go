@@ -90,6 +90,7 @@ var (
 	// Security
 	INJECTION_DETECTED       = New(1600, "SECURITY", "prompt injection detected", false, 0)
 	CONTENT_POLICY_VIOLATION = New(1601, "SECURITY", "content policy violation", false, 0)
+	RATE_LIMITED             = New(1602, "SECURITY", "rate limit exceeded", true, 5000)
 
 	// Plugin
 	PLUGIN_UNAVAILABLE = New(1700, "PLUGIN", "plugin unavailable", true, 0)

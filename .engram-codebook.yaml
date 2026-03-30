@@ -1,0 +1,10 @@
+dimensions:
+  lang: go
+  build: go_build,buf
+  testing: table_driven_testify_go_test
+  err_style: wrap_errorf_no_panic
+  logging: slog_structured
+  arch: modular_monolith
+  concurrency: errgroup_ctx_cancel_goroutines
+  transport: quic,websocket,grpc,rest,webtransport,tcp
+  pkg_style: no_circular,internal_pkg,interface_at_consumer

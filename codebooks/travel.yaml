@@ -1,0 +1,108 @@
+name: travel
+version: 1
+dimensions:
+  # --- Traveler Profile ---
+  - name: budget
+    type: enum
+    values: [budget, moderate, premium, luxury]
+    required: true
+
+  - name: travel_style
+    type: enum
+    values: [adventure, cultural, relaxation, foodie, road_trip, family, solo, couples]
+    required: true
+
+  - name: mobility
+    type: enum
+    values: [full, limited, wheelchair, stroller]
+    required: false
+
+  - name: age_range
+    type: enum
+    values: [18-25, 26-35, 36-50, 51-65, 65+]
+    required: false
+
+  - name: group_size
+    type: range
+    min: 1
+    max: 20
+    required: true
+
+  - name: has_kids
+    type: boolean
+    required: false
+
+  - name: has_pets
+    type: boolean
+    required: false
+
+  # --- Preferences ---
+  - name: lodging
+    type: enum
+    values: [hotel, airbnb, camping, rv, hostel, boutique, resort]
+    required: true
+
+  - name: transport
+    type: enum
+    values: [fly, drive, train, rv, mixed]
+    required: true
+
+  - name: food_pref
+    type: enum
+    values: [anything, vegetarian, vegan, gluten_free, halal, kosher, allergies]
+    required: false
+
+  - name: pace
+    type: enum
+    values: [packed, moderate, slow]
+    required: true
+
+  - name: outdoors
+    type: scale
+    min: 1
+    max: 5
+    required: false
+
+  - name: nightlife
+    type: scale
+    min: 1
+    max: 5
+    required: false
+
+  - name: history_interest
+    type: scale
+    min: 1
+    max: 5
+    required: false
+
+  # --- Trip Context ---
+  - name: home_state
+    type: enum
+    values: [AL,AK,AZ,AR,CA,CO,CT,DE,FL,GA,HI,ID,IL,IN,IA,KS,KY,LA,ME,MD,MA,MI,MN,MS,MO,MT,NE,NV,NH,NJ,NM,NY,NC,ND,OH,OK,OR,PA,RI,SC,SD,TN,TX,UT,VT,VA,WA,WV,WI,WY,DC]
+    required: true
+
+  - name: region_pref
+    type: enum
+    values: [northeast, southeast, midwest, southwest, west, pacific_nw, mountain, any]
+    required: false
+
+  - name: trip_days
+    type: range
+    min: 1
+    max: 90
+    required: true
+
+  - name: season
+    type: enum
+    values: [spring, summer, fall, winter]
+    required: true
+
+  - name: visited
+    type: enum
+    values: [few, moderate, extensive]
+    required: false
+
+  - name: avoid
+    type: enum
+    values: [crowds, heat, cold, altitude, long_drives, flying, none]
+    required: false
