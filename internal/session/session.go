@@ -10,6 +10,12 @@ import (
 	engramErrors "github.com/pythondatascrape/engram/internal/errors"
 )
 
+// Message is a single turn stored in session history.
+type Message struct {
+	Role    string
+	Content string
+}
+
 // Status represents the lifecycle state of a session.
 type Status string
 
@@ -38,6 +44,7 @@ type Session struct {
 	LastActivity       time.Time
 	Opts               Opts
 	SerializedIdentity string
+	History            []Message
 	Turns              int
 	TokensSent         int
 	TokensSaved        int
@@ -84,6 +91,30 @@ func (s *Session) SetIdentity(serialized string) {
 	s.SerializedIdentity = serialized
 }
 
+// SetIdentityTokens stores the raw (uncompressed) identity character count for savings tracking.
+func (s *Session) SetIdentityTokens(n int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.IdentityTokens = n
+}
+
+// IdentityBaseline returns the raw identity char count used for savings tracking.
+func (s *Session) IdentityBaseline() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.IdentityTokens
+}
+
+// AppendHistory adds a user/assistant exchange to the session's conversation history.
+func (s *Session) AppendHistory(userMsg, assistantMsg string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.History = append(s.History,
+		Message{Role: "user", Content: userMsg},
+		Message{Role: "assistant", Content: assistantMsg},
+	)
+}
+
 // RecordTurn increments the turn counter and accumulates token counts directly.
 func (s *Session) RecordTurn(tokensSent, tokensSaved int) {
 	s.mu.Lock()
@@ -106,16 +137,20 @@ type RequestContext struct {
 	ID                 string
 	SerializedIdentity string
 	Model              string
+	History            []Message
 }
 
 // RequestCtx returns a lightweight snapshot for prompt assembly.
 func (s *Session) RequestCtx() RequestContext {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	history := make([]Message, len(s.History))
+	copy(history, s.History)
 	return RequestContext{
 		ID:                 s.ID,
 		SerializedIdentity: s.SerializedIdentity,
 		Model:              s.Opts.Model,
+		History:            history,
 	}
 }
 

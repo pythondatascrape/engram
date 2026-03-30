@@ -21,8 +21,9 @@ type IncomingRequest struct {
 	APIKey    string
 	SessionID string
 	Query     string
-	Identity  map[string]string
-	Opts      session.Opts
+	Identity            map[string]string
+	Opts                session.Opts
+	VerboseIdentitySize int // baseline char count for savings calculation (optional)
 }
 
 // Response is the result returned to the caller after a turn is processed.
@@ -126,6 +127,13 @@ func (h *Handler) HandleRequest(ctx context.Context, req IncomingRequest) (Respo
 			return Response{}, err
 		}
 		s.SetIdentity(serialized)
+		rawSize := req.VerboseIdentitySize
+		if rawSize == 0 {
+			for k, v := range req.Identity {
+				rawSize += len(k) + len(v) + 2
+			}
+		}
+		s.SetIdentityTokens(rawSize)
 		slog.Info("session created", "session_id", s.ID, "client_id", req.ClientID)
 		sess = s
 	} else {
@@ -150,10 +158,16 @@ func (h *Handler) HandleRequest(ctx context.Context, req IncomingRequest) (Respo
 		return Response{}, err
 	}
 
+	history := make([]provider.Message, len(rctx.History))
+	for i, m := range rctx.History {
+		history[i] = provider.Message{Role: m.Role, Content: m.Content}
+	}
+
 	chunks, err := conn.Provider.Send(ctx, &provider.Request{
-		Model:        rctx.Model,
-		SystemPrompt: prompt,
-		Query:        req.Query,
+		Model:               rctx.Model,
+		SystemPrompt:        prompt,
+		Query:               req.Query,
+		ConversationHistory: history,
 	})
 	if err != nil {
 		h.pool.Return(conn)
@@ -162,23 +176,44 @@ func (h *Handler) HandleRequest(ctx context.Context, req IncomingRequest) (Respo
 
 	var sb strings.Builder
 	for chunk := range chunks {
+		if len(chunk.Text) > 0 {
+			if sb.Len()+len(chunk.Text) > maxResponseBytes {
+				sb.WriteString(chunk.Text[:maxResponseBytes-sb.Len()])
+				break
+			}
+			sb.WriteString(chunk.Text)
+		}
 		if chunk.Done {
 			break
 		}
-		if sb.Len()+len(chunk.Text) > maxResponseBytes {
-			sb.WriteString(chunk.Text[:maxResponseBytes-sb.Len()])
-			break
-		}
-		sb.WriteString(chunk.Text)
 	}
 	fullText := sb.String()
 
 	h.pool.Return(conn)
 
-	tokensSent := len(prompt)
-	sess.RecordTurn(tokensSent, 0)
+	sess.AppendHistory(req.Query, fullText)
 
-	slog.Debug("request completed", "session_id", rctx.ID, "tokens_sent", tokensSent)
+	// prompt already contains the query via AssemblePrompt; history content
+	// was sent to the provider alongside the prompt.
+	tokensSent := len(prompt)
+	for _, m := range rctx.History {
+		tokensSent += len(m.Content)
+	}
+	tokensSaved := 0
+	if baseline := sess.IdentityBaseline(); baseline > 0 {
+		if saved := baseline - len(rctx.SerializedIdentity); saved > 0 {
+			tokensSaved = saved
+		}
+	}
+	sess.RecordTurn(tokensSent, tokensSaved)
+
+	slog.Info("turn recorded",
+		"session_id", rctx.ID,
+		"tokens_sent", tokensSent,
+		"tokens_saved", tokensSaved,
+		"identity_baseline", sess.IdentityBaseline(),
+		"serialized_len", len(rctx.SerializedIdentity),
+	)
 
 	return Response{
 		SessionID:   rctx.ID,
