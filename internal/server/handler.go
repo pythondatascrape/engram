@@ -220,7 +220,11 @@ func (h *Handler) HandleRequest(ctx context.Context, req IncomingRequest) (Respo
 			"content": req.Query,
 		}
 		compressedResp := "role=assistant content=" + fullText
-		rawSize := len(req.Query) + len(fullText)
+		// Baseline: JSON wire format overhead per message pair.
+		// {"role":"user","content":"..."} = 24 overhead + content
+		// {"role":"assistant","content":"..."} = 30 overhead + content
+		jsonOverhead := 54
+		rawSize := jsonOverhead + len(req.Query) + len(fullText)
 		before := sess.History.TokenCount()
 		_ = sess.History.Append(sess.ContextCodebook, requestTurn, compressedResp)
 		compressedSize := sess.History.TokenCount() - before
