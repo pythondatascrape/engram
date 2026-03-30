@@ -97,7 +97,7 @@ func TestAssemblePrompt_WithHistory(t *testing.T) {
 
 	result := server.AssemblePrompt(server.PromptParts{
 		Identity: "domain=travel",
-		History:  h,
+		History:  h.Messages(),
 		Query:    "Next question",
 	})
 	assert.Contains(t, result, "[HISTORY]")

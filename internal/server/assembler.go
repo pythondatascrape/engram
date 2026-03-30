@@ -3,16 +3,16 @@ package server
 import (
 	"strings"
 
-	engramctx "github.com/pythondatascrape/engram/internal/context"
+	"github.com/pythondatascrape/engram/internal/provider"
 )
 
 // PromptParts holds the components of a structured prompt.
 type PromptParts struct {
 	Identity            string
 	Knowledge           string
-	ContextCodebookDef  string              // optional — injected as [CONTEXT_CODEBOOK] block
-	ResponseCodebookDef string              // optional — injected as [RESPONSE_CODEBOOK] block
-	History             *engramctx.History  // optional — injected as [HISTORY] block
+	ContextCodebookDef  string             // optional — injected as [CONTEXT_CODEBOOK] block
+	ResponseCodebookDef string             // optional — injected as [RESPONSE_CODEBOOK] block
+	History             []provider.Message // optional — injected as [HISTORY] block
 	Query               string
 }
 
@@ -44,9 +44,9 @@ func AssemblePrompt(parts PromptParts) string {
 		b.WriteByte('\n')
 	}
 
-	if parts.History != nil && parts.History.Len() > 0 {
+	if len(parts.History) > 0 {
 		b.WriteString("\n[HISTORY]\n")
-		for _, msg := range parts.History.Messages() {
+		for _, msg := range parts.History {
 			b.WriteString(msg.Role)
 			b.WriteString(": ")
 			b.WriteString(msg.Content)

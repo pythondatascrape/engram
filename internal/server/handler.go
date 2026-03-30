@@ -159,28 +159,32 @@ func (h *Handler) HandleRequest(ctx context.Context, req IncomingRequest) (Respo
 
 	rctx := sess.RequestCtx()
 
+	var history []provider.Message
+	if rctx.History != nil {
+		history = rctx.History.Messages()
+	}
+
 	var ctxCodebookDef, respCodebookDef string
 	if rctx.ContextCodebook != nil {
 		ctxCodebookDef = rctx.ContextCodebook.Definition()
-		respCodebookDef = engramctx.AnthropicResponseCodebook().Definition()
+		if sess.Opts.Provider == "openai" {
+			respCodebookDef = engramctx.OpenAIResponseCodebook().Definition()
+		} else {
+			respCodebookDef = engramctx.AnthropicResponseCodebook().Definition()
+		}
 	}
 
 	prompt := AssemblePrompt(PromptParts{
 		Identity:            rctx.SerializedIdentity,
 		ContextCodebookDef:  ctxCodebookDef,
 		ResponseCodebookDef: respCodebookDef,
-		History:             rctx.History,
+		History:             history,
 		Query:               req.Query,
 	})
 
 	conn, err := h.pool.Get(ctx, req.APIKey)
 	if err != nil {
 		return Response{}, err
-	}
-
-	var history []provider.Message
-	if rctx.History != nil {
-		history = rctx.History.Messages()
 	}
 
 	chunks, err := conn.Provider.Send(ctx, &provider.Request{
@@ -214,14 +218,7 @@ func (h *Handler) HandleRequest(ctx context.Context, req IncomingRequest) (Respo
 			"role":    "user",
 			"content": req.Query,
 		}
-		respCB := engramctx.AnthropicResponseCodebook()
-		compressedResp, _ := respCB.SerializeTurn(map[string]string{
-			"role":    "assistant",
-			"content": fullText,
-		})
-		if compressedResp == "" {
-			compressedResp = "role=assistant content=" + fullText
-		}
+		compressedResp := "role=assistant content=" + fullText
 		_ = sess.History.Append(sess.ContextCodebook, requestTurn, compressedResp)
 	}
 
