@@ -10,6 +10,7 @@ import (
 
 	engramErrors "github.com/pythondatascrape/engram/internal/errors"
 	"github.com/pythondatascrape/engram/internal/session"
+	engramctx "github.com/pythondatascrape/engram/internal/context"
 )
 
 func defaultConfig() session.ManagerConfig {
@@ -240,6 +241,21 @@ func TestEvictIdleByMaxTTL(t *testing.T) {
 	evicted := m.EvictIdle()
 	assert.Contains(t, evicted, s.ID)
 	assert.Equal(t, 0, m.Count())
+}
+
+func TestSession_HistoryIntegration(t *testing.T) {
+	ctx := context.Background()
+	m := session.NewManager(session.ManagerConfig{MaxSessions: 10})
+	s, err := m.Create(ctx, "client-1", session.Opts{})
+	require.NoError(t, err)
+
+	cb, _ := engramctx.DeriveCodebook("app", map[string]string{"role": "text", "content": "text"})
+	s.SetContextCodebook(cb)
+	s.SetHistory(engramctx.NewHistory())
+
+	snap := s.Snapshot()
+	assert.NotNil(t, snap.EngramHistory)
+	assert.NotNil(t, snap.ContextCodebook)
 }
 
 func TestEvictIdleKeepsActive(t *testing.T) {

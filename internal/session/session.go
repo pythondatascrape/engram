@@ -8,6 +8,7 @@ import (
 	"time"
 
 	engramErrors "github.com/pythondatascrape/engram/internal/errors"
+	engramctx "github.com/pythondatascrape/engram/internal/context"
 )
 
 // Message is a single turn stored in session history.
@@ -49,6 +50,8 @@ type Session struct {
 	TokensSent         int
 	TokensSaved        int
 	IdentityTokens     int
+	EngramHistory      *engramctx.History
+	ContextCodebook    *engramctx.ContextCodebook
 }
 
 // generateID produces a 32-char hex session identifier using crypto/rand.
@@ -98,6 +101,20 @@ func (s *Session) SetIdentityTokens(n int) {
 	s.IdentityTokens = n
 }
 
+// SetContextCodebook stores the derived context codebook on the session.
+func (s *Session) SetContextCodebook(cb *engramctx.ContextCodebook) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.ContextCodebook = cb
+}
+
+// SetHistory stores the conversation history on the session.
+func (s *Session) SetHistory(h *engramctx.History) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.EngramHistory = h
+}
+
 // IdentityBaseline returns the raw identity char count used for savings tracking.
 func (s *Session) IdentityBaseline() int {
 	s.mu.RLock()
@@ -138,6 +155,8 @@ type RequestContext struct {
 	SerializedIdentity string
 	Model              string
 	History            []Message
+	EngramHistory      *engramctx.History
+	ContextCodebook    *engramctx.ContextCodebook
 }
 
 // RequestCtx returns a lightweight snapshot for prompt assembly.
@@ -151,6 +170,8 @@ func (s *Session) RequestCtx() RequestContext {
 		SerializedIdentity: s.SerializedIdentity,
 		Model:              s.Opts.Model,
 		History:            history,
+		EngramHistory:      s.EngramHistory,
+		ContextCodebook:    s.ContextCodebook,
 	}
 }
 
@@ -170,5 +191,7 @@ func (s *Session) Snapshot() Session {
 		TokensSent:         s.TokensSent,
 		TokensSaved:        s.TokensSaved,
 		IdentityTokens:     s.IdentityTokens,
+		EngramHistory:      s.EngramHistory,
+		ContextCodebook:    s.ContextCodebook,
 	}
 }
