@@ -347,6 +347,57 @@ dimensions:
 	assert.Greater(t, savedPct, 0.0, "savedPct should be > 0.0")
 }
 
+func TestHandleRequest_ContextCodebookStored(t *testing.T) {
+	ctx := context.Background()
+	mgr, ser, cb, p := newTestDeps(t)
+	h := NewHandler(mgr, ser, cb, p)
+
+	req := IncomingRequest{
+		ClientID: "client-1",
+		APIKey:   "key-1",
+		Query:    "hello",
+		Identity: map[string]string{"role": "admin", "domain": "fire"},
+		ContextSchema: map[string]string{
+			"role":    "enum:user,assistant",
+			"content": "text",
+		},
+	}
+	resp, err := h.HandleRequest(ctx, req)
+	require.NoError(t, err)
+	assert.NotEmpty(t, resp.SessionID)
+
+	sess, _ := mgr.Get(resp.SessionID)
+	snap := sess.Snapshot()
+	assert.NotNil(t, snap.ContextCodebook)
+	assert.NotNil(t, snap.History)
+}
+
+func TestHandleRequest_HistoryGrowsAcrossTurns(t *testing.T) {
+	ctx := context.Background()
+	mgr, ser, cb, p := newTestDeps(t)
+	h := NewHandler(mgr, ser, cb, p)
+
+	first, err := h.HandleRequest(ctx, IncomingRequest{
+		ClientID: "client-1",
+		APIKey:   "key-1",
+		Query:    "turn one",
+		Identity: map[string]string{"role": "admin", "domain": "fire"},
+		ContextSchema: map[string]string{"role": "text", "content": "text"},
+	})
+	require.NoError(t, err)
+
+	_, err = h.HandleRequest(ctx, IncomingRequest{
+		ClientID:  "client-1",
+		APIKey:    "key-1",
+		SessionID: first.SessionID,
+		Query:     "turn two",
+	})
+	require.NoError(t, err)
+
+	sess, _ := mgr.Get(first.SessionID)
+	assert.Equal(t, 2, sess.Snapshot().History.Len()) // both turns stored in history
+}
+
 func TestHandleRequest_SessionLimitExceeded(t *testing.T) {
 	cb, err := codebook.Parse([]byte(testCodebookYAML))
 	require.NoError(t, err)
