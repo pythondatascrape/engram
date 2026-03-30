@@ -1,36 +1,57 @@
 package server
 
-import "strings"
+import (
+	"strings"
+
+	engramctx "github.com/pythondatascrape/engram/internal/context"
+)
 
 // PromptParts holds the components of a structured prompt.
 type PromptParts struct {
-	Identity  string
-	Knowledge string
-	Query     string
+	Identity            string
+	Knowledge           string
+	ContextCodebookDef  string              // optional — injected as [CONTEXT_CODEBOOK] block
+	ResponseCodebookDef string              // optional — injected as [RESPONSE_CODEBOOK] block
+	History             *engramctx.History  // optional — injected as [HISTORY] block
+	Query               string
 }
 
 // AssemblePrompt creates the structured system prompt with [IDENTITY],
-// optional [KNOWLEDGE], and [QUERY] delimiters.
+// optional [KNOWLEDGE], optional [CONTEXT_CODEBOOK], optional [RESPONSE_CODEBOOK],
+// optional [HISTORY], and [QUERY] delimiters.
 func AssemblePrompt(parts PromptParts) string {
-	// Pre-calculate exact size to avoid reallocation.
-	// Fixed delimiters: "[IDENTITY]\n" (11) + "\n" (1) + "\n[QUERY]\n" (9) = 21
-	size := 21 + len(parts.Identity) + len(parts.Query)
-	if parts.Knowledge != "" {
-		// "\n[KNOWLEDGE]\n" (14) + "\n" (1) = 15
-		size += 15 + len(parts.Knowledge)
-	}
-
 	var b strings.Builder
-	b.Grow(size)
 
 	b.WriteString("[IDENTITY]\n")
 	b.WriteString(parts.Identity)
-	b.WriteString("\n")
+	b.WriteByte('\n')
 
 	if parts.Knowledge != "" {
 		b.WriteString("\n[KNOWLEDGE]\n")
 		b.WriteString(parts.Knowledge)
-		b.WriteString("\n")
+		b.WriteByte('\n')
+	}
+
+	if parts.ContextCodebookDef != "" {
+		b.WriteString("\n[CONTEXT_CODEBOOK]\n")
+		b.WriteString(parts.ContextCodebookDef)
+		b.WriteByte('\n')
+	}
+
+	if parts.ResponseCodebookDef != "" {
+		b.WriteString("\n[RESPONSE_CODEBOOK]\n")
+		b.WriteString(parts.ResponseCodebookDef)
+		b.WriteByte('\n')
+	}
+
+	if parts.History != nil && parts.History.Len() > 0 {
+		b.WriteString("\n[HISTORY]\n")
+		for _, msg := range parts.History.Messages() {
+			b.WriteString(msg.Role)
+			b.WriteString(": ")
+			b.WriteString(msg.Content)
+			b.WriteByte('\n')
+		}
 	}
 
 	b.WriteString("\n[QUERY]\n")
