@@ -254,7 +254,7 @@ func TestSession_HistoryIntegration(t *testing.T) {
 	s.SetHistory(engramctx.NewHistory())
 
 	snap := s.Snapshot()
-	assert.NotNil(t, snap.EngramHistory)
+	assert.NotNil(t, snap.History)
 	assert.NotNil(t, snap.ContextCodebook)
 }
 

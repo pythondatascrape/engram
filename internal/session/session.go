@@ -11,12 +11,6 @@ import (
 	engramctx "github.com/pythondatascrape/engram/internal/context"
 )
 
-// Message is a single turn stored in session history.
-type Message struct {
-	Role    string
-	Content string
-}
-
 // Status represents the lifecycle state of a session.
 type Status string
 
@@ -45,12 +39,11 @@ type Session struct {
 	LastActivity       time.Time
 	Opts               Opts
 	SerializedIdentity string
-	History            []Message
 	Turns              int
 	TokensSent         int
 	TokensSaved        int
 	IdentityTokens     int
-	EngramHistory      *engramctx.History
+	History            *engramctx.History
 	ContextCodebook    *engramctx.ContextCodebook
 }
 
@@ -112,7 +105,7 @@ func (s *Session) SetContextCodebook(cb *engramctx.ContextCodebook) {
 func (s *Session) SetHistory(h *engramctx.History) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.EngramHistory = h
+	s.History = h
 }
 
 // IdentityBaseline returns the raw identity char count used for savings tracking.
@@ -120,16 +113,6 @@ func (s *Session) IdentityBaseline() int {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.IdentityTokens
-}
-
-// AppendHistory adds a user/assistant exchange to the session's conversation history.
-func (s *Session) AppendHistory(userMsg, assistantMsg string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.History = append(s.History,
-		Message{Role: "user", Content: userMsg},
-		Message{Role: "assistant", Content: assistantMsg},
-	)
 }
 
 // RecordTurn increments the turn counter and accumulates token counts directly.
@@ -154,8 +137,7 @@ type RequestContext struct {
 	ID                 string
 	SerializedIdentity string
 	Model              string
-	History            []Message
-	EngramHistory      *engramctx.History
+	History            *engramctx.History
 	ContextCodebook    *engramctx.ContextCodebook
 }
 
@@ -163,14 +145,11 @@ type RequestContext struct {
 func (s *Session) RequestCtx() RequestContext {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	history := make([]Message, len(s.History))
-	copy(history, s.History)
 	return RequestContext{
 		ID:                 s.ID,
 		SerializedIdentity: s.SerializedIdentity,
 		Model:              s.Opts.Model,
-		History:            history,
-		EngramHistory:      s.EngramHistory,
+		History:            s.History,
 		ContextCodebook:    s.ContextCodebook,
 	}
 }
@@ -191,7 +170,7 @@ func (s *Session) Snapshot() Session {
 		TokensSent:         s.TokensSent,
 		TokensSaved:        s.TokensSaved,
 		IdentityTokens:     s.IdentityTokens,
-		EngramHistory:      s.EngramHistory,
+		History:            s.History,
 		ContextCodebook:    s.ContextCodebook,
 	}
 }
