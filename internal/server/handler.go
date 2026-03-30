@@ -213,23 +213,26 @@ func (h *Handler) HandleRequest(ctx context.Context, req IncomingRequest) (Respo
 	}
 	fullText := sb.String()
 
+	// Baseline for this turn: what would have been sent without any Engram compression.
+	// = verbose identity size + raw history accumulated so far (JSON format) + query
+	// JSON overhead per prior turn pair: {"role":"user","content":"..."} + {"role":"assistant",...} = 54 chars
+	const jsonMsgOverhead = 54
+	rawHistoryNow := sess.RawHistory()
+	baselineThisTurn := sess.IdentityBaseline() + rawHistoryNow + len(req.Query)
+
 	var contextSaved int
+	rawTurnBytes := jsonMsgOverhead + len(req.Query) + len(fullText)
 	if sess.ContextCodebook != nil && sess.History != nil {
 		requestTurn := map[string]string{
 			"role":    "user",
 			"content": req.Query,
 		}
 		compressedResp := "role=assistant content=" + fullText
-		// Baseline: JSON wire format overhead per message pair.
-		// {"role":"user","content":"..."} = 24 overhead + content
-		// {"role":"assistant","content":"..."} = 30 overhead + content
-		jsonOverhead := 54
-		rawSize := jsonOverhead + len(req.Query) + len(fullText)
 		before := sess.History.TokenCount()
 		_ = sess.History.Append(sess.ContextCodebook, requestTurn, compressedResp)
 		compressedSize := sess.History.TokenCount() - before
-		if rawSize > compressedSize {
-			contextSaved = rawSize - compressedSize
+		if rawTurnBytes > compressedSize {
+			contextSaved = rawTurnBytes - compressedSize
 		}
 	}
 
@@ -243,7 +246,7 @@ func (h *Handler) HandleRequest(ctx context.Context, req IncomingRequest) (Respo
 			identitySaved = saved
 		}
 	}
-	sess.RecordTurn(tokensSent, identitySaved, contextSaved)
+	sess.RecordTurn(tokensSent, identitySaved, contextSaved, baselineThisTurn, rawTurnBytes)
 
 	slog.Info("turn recorded",
 		"session_id", rctx.ID,

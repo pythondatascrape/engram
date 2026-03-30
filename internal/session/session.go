@@ -39,10 +39,12 @@ type Session struct {
 	LastActivity       time.Time
 	Opts               Opts
 	SerializedIdentity string
-	Turns              int
+	Turns               int
 	TokensSent          int
 	TokensSaved         int
 	ContextTokensSaved  int
+	CumulativeBaseline  int // sum of per-turn "what would have been sent without Engram"
+	RawHistoryBytes     int // running total of raw turn sizes (for next turn's baseline)
 	IdentityTokens      int
 	History            *engramctx.History
 	ContextCodebook    *engramctx.ContextCodebook
@@ -116,15 +118,26 @@ func (s *Session) IdentityBaseline() int {
 	return s.IdentityTokens
 }
 
-// RecordTurn increments the turn counter and accumulates token counts directly.
-func (s *Session) RecordTurn(tokensSent, identitySaved, contextSaved int) {
+// RecordTurn increments the turn counter and accumulates all token counts.
+// baselineThisTurn is what would have been sent without any Engram compression.
+// rawTurnBytes is the raw size of this turn's query+response (for next turn's baseline).
+func (s *Session) RecordTurn(tokensSent, identitySaved, contextSaved, baselineThisTurn, rawTurnBytes int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.Turns++
 	s.TokensSent += tokensSent
 	s.TokensSaved += identitySaved
 	s.ContextTokensSaved += contextSaved
+	s.CumulativeBaseline += baselineThisTurn
+	s.RawHistoryBytes += rawTurnBytes
 	s.LastActivity = time.Now()
+}
+
+// RawHistory returns the accumulated raw turn bytes (query+response) from all prior turns.
+func (s *Session) RawHistory() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.RawHistoryBytes
 }
 
 // Touch updates LastActivity to now.
@@ -172,6 +185,8 @@ func (s *Session) Snapshot() Session {
 		TokensSent:          s.TokensSent,
 		TokensSaved:         s.TokensSaved,
 		ContextTokensSaved:  s.ContextTokensSaved,
+		CumulativeBaseline:  s.CumulativeBaseline,
+		RawHistoryBytes:     s.RawHistoryBytes,
 		IdentityTokens:      s.IdentityTokens,
 		History:            s.History,
 		ContextCodebook:    s.ContextCodebook,
