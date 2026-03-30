@@ -87,7 +87,7 @@ func (m *Manager) SetIdentity(id, serialized string) error {
 }
 
 // RecordTurn increments the turn counter, accumulates token counts, and touches LastActivity.
-func (m *Manager) RecordTurn(id string, tokensSent, tokensSaved int) error {
+func (m *Manager) RecordTurn(id string, tokensSent, identitySaved, contextSaved int) error {
 	s, err := m.Get(id)
 	if err != nil {
 		return err
@@ -97,7 +97,8 @@ func (m *Manager) RecordTurn(id string, tokensSent, tokensSaved int) error {
 	defer s.mu.Unlock()
 	s.Turns++
 	s.TokensSent += tokensSent
-	s.TokensSaved += tokensSaved
+	s.TokensSaved += identitySaved
+	s.ContextTokensSaved += contextSaved
 	s.LastActivity = time.Now()
 	return nil
 }

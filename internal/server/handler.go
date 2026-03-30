@@ -213,31 +213,39 @@ func (h *Handler) HandleRequest(ctx context.Context, req IncomingRequest) (Respo
 	}
 	fullText := sb.String()
 
+	var contextSaved int
 	if sess.ContextCodebook != nil && sess.History != nil {
 		requestTurn := map[string]string{
 			"role":    "user",
 			"content": req.Query,
 		}
 		compressedResp := "role=assistant content=" + fullText
+		rawSize := len(req.Query) + len(fullText)
+		before := sess.History.TokenCount()
 		_ = sess.History.Append(sess.ContextCodebook, requestTurn, compressedResp)
+		compressedSize := sess.History.TokenCount() - before
+		if rawSize > compressedSize {
+			contextSaved = rawSize - compressedSize
+		}
 	}
 
 	h.pool.Return(conn)
 
 	// prompt already contains the query via AssemblePrompt.
 	tokensSent := len(prompt)
-	tokensSaved := 0
+	identitySaved := 0
 	if baseline := sess.IdentityBaseline(); baseline > 0 {
 		if saved := baseline - len(rctx.SerializedIdentity); saved > 0 {
-			tokensSaved = saved
+			identitySaved = saved
 		}
 	}
-	sess.RecordTurn(tokensSent, tokensSaved)
+	sess.RecordTurn(tokensSent, identitySaved, contextSaved)
 
 	slog.Info("turn recorded",
 		"session_id", rctx.ID,
 		"tokens_sent", tokensSent,
-		"tokens_saved", tokensSaved,
+		"identity_saved", identitySaved,
+		"context_saved", contextSaved,
 		"identity_baseline", sess.IdentityBaseline(),
 		"serialized_len", len(rctx.SerializedIdentity),
 	)

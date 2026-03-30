@@ -134,10 +134,10 @@ func TestRecordTurn(t *testing.T) {
 	s, err := m.Create(ctx, "client-1", defaultOpts())
 	require.NoError(t, err)
 
-	err = m.RecordTurn(s.ID, 100, 50)
+	err = m.RecordTurn(s.ID, 100, 50, 0)
 	require.NoError(t, err)
 
-	err = m.RecordTurn(s.ID, 200, 75)
+	err = m.RecordTurn(s.ID, 200, 75, 0)
 	require.NoError(t, err)
 
 	snap := s.Snapshot()
@@ -211,7 +211,7 @@ func TestSetIdentityNonexistent(t *testing.T) {
 func TestRecordTurnNonexistent(t *testing.T) {
 	m := session.NewManager(defaultConfig())
 
-	err := m.RecordTurn("bogus", 100, 50)
+	err := m.RecordTurn("bogus", 100, 50, 0)
 	require.Error(t, err)
 	assert.Equal(t, engramErrors.SESSION_NOT_FOUND, err)
 }

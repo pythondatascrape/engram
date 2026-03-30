@@ -40,9 +40,10 @@ type Session struct {
 	Opts               Opts
 	SerializedIdentity string
 	Turns              int
-	TokensSent         int
-	TokensSaved        int
-	IdentityTokens     int
+	TokensSent          int
+	TokensSaved         int
+	ContextTokensSaved  int
+	IdentityTokens      int
 	History            *engramctx.History
 	ContextCodebook    *engramctx.ContextCodebook
 }
@@ -116,12 +117,13 @@ func (s *Session) IdentityBaseline() int {
 }
 
 // RecordTurn increments the turn counter and accumulates token counts directly.
-func (s *Session) RecordTurn(tokensSent, tokensSaved int) {
+func (s *Session) RecordTurn(tokensSent, identitySaved, contextSaved int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.Turns++
 	s.TokensSent += tokensSent
-	s.TokensSaved += tokensSaved
+	s.TokensSaved += identitySaved
+	s.ContextTokensSaved += contextSaved
 	s.LastActivity = time.Now()
 }
 
@@ -167,9 +169,10 @@ func (s *Session) Snapshot() Session {
 		Opts:               s.Opts,
 		SerializedIdentity: s.SerializedIdentity,
 		Turns:              s.Turns,
-		TokensSent:         s.TokensSent,
-		TokensSaved:        s.TokensSaved,
-		IdentityTokens:     s.IdentityTokens,
+		TokensSent:          s.TokensSent,
+		TokensSaved:         s.TokensSaved,
+		ContextTokensSaved:  s.ContextTokensSaved,
+		IdentityTokens:      s.IdentityTokens,
 		History:            s.History,
 		ContextCodebook:    s.ContextCodebook,
 	}
