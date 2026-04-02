@@ -39,6 +39,7 @@ const (
 	maxQueryBytes    = 32 * 1024   // 32 KB
 	maxIdentityBytes = 4 * 1024    // 4 KB total across all k/v pairs
 	maxResponseBytes = 1024 * 1024 // 1 MB
+	jsonMsgOverhead  = 54          // per-turn JSON wire format overhead: {"role":"user","content":"..."} + assistant counterpart
 )
 
 // Handler orchestrates identity serialization, session management, prompt
@@ -215,22 +216,21 @@ func (h *Handler) HandleRequest(ctx context.Context, req IncomingRequest) (Respo
 
 	// Baseline for this turn: what would have been sent without any Engram compression.
 	// = verbose identity size + raw history accumulated so far (JSON format) + query
-	// JSON overhead per prior turn pair: {"role":"user","content":"..."} + {"role":"assistant",...} = 54 chars
-	const jsonMsgOverhead = 54
+	identityBaseline := sess.IdentityBaseline()
 	rawHistoryNow := sess.RawHistory()
-	baselineThisTurn := sess.IdentityBaseline() + rawHistoryNow + len(req.Query)
+	baselineThisTurn := identityBaseline + rawHistoryNow + len(req.Query)
 
 	var contextSaved int
 	rawTurnBytes := jsonMsgOverhead + len(req.Query) + len(fullText)
-	if sess.ContextCodebook != nil && sess.History != nil {
+	if rctx.ContextCodebook != nil && rctx.History != nil {
 		requestTurn := map[string]string{
 			"role":    "user",
 			"content": req.Query,
 		}
 		compressedResp := "role=assistant content=" + fullText
-		before := sess.History.TokenCount()
-		_ = sess.History.Append(sess.ContextCodebook, requestTurn, compressedResp)
-		compressedSize := sess.History.TokenCount() - before
+		before := rctx.History.TokenCount()
+		_ = rctx.History.Append(rctx.ContextCodebook, requestTurn, compressedResp)
+		compressedSize := rctx.History.TokenCount() - before
 		if rawTurnBytes > compressedSize {
 			contextSaved = rawTurnBytes - compressedSize
 		}
@@ -241,8 +241,8 @@ func (h *Handler) HandleRequest(ctx context.Context, req IncomingRequest) (Respo
 	// prompt already contains the query via AssemblePrompt.
 	tokensSent := len(prompt)
 	identitySaved := 0
-	if baseline := sess.IdentityBaseline(); baseline > 0 {
-		if saved := baseline - len(rctx.SerializedIdentity); saved > 0 {
+	if identityBaseline > 0 {
+		if saved := identityBaseline - len(rctx.SerializedIdentity); saved > 0 {
 			identitySaved = saved
 		}
 	}
