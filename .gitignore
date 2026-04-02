@@ -35,8 +35,6 @@ api.txt
 
 docs/
 
-CLAUDE.md
-
 # Worktrees
 .worktrees/
 
@@ -48,3 +46,9 @@ autoresearch-results.tsv
 autoresearch-perf-results.tsv
 autoresearch-loc-results.tsv
 /security/
+
+# Internal docs (kept in Obsidian vault)
+.claude/
+CLAUDE.md
+**/CLAUDE.md
+EFFICIENCY_REVIEW.md
