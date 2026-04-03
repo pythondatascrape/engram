@@ -1,12 +1,8 @@
 Metadata-Version: 2.4
 Name: engram
-Version: 0.1.0
-Summary: Python SDK for Engram identity compression
+Version: 0.2.0
+Summary: Python SDK for the Engram compression daemon
 Requires-Python: >=3.11
-Requires-Dist: pydantic>=2.0
-Requires-Dist: pyyaml>=6.0
-Provides-Extra: embedded
-Provides-Extra: hosted
 Provides-Extra: dev
 Requires-Dist: pytest>=8.0; extra == "dev"
 Requires-Dist: pytest-asyncio>=0.24; extra == "dev"

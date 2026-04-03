@@ -1,57 +1,130 @@
-"""Tests for the Engram client."""
+"""Tests for the daemon-backed Engram client."""
 
+import json
+import asyncio
+import os
+import tempfile
 import pytest
-from engram.client import Engram
-from engram.codebook import Codebook, Enum, Range
-from engram.errors import EngramError
+
+from engram import Engram, EngramError
 
 
-class TestCB(Codebook):
-    __codebook_name__ = "test"
-    __codebook_version__ = 1
-    cuisine: str = Enum(values=["italian", "thai"], required=True)
+class FakeDaemon:
+    def __init__(self, socket_path: str):
+        self.socket_path = socket_path
+        self._server = None
+        self._responses: dict[str, dict] = {}
+
+    def set_response(self, method: str, result: dict):
+        self._responses[method] = result
+
+    async def _handle(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
+        data = await reader.read(65536)
+        request = json.loads(data.decode())
+        method = request["method"]
+        result = self._responses.get(method, {})
+        response = {"jsonrpc": "2.0", "id": request["id"], "result": result}
+        writer.write(json.dumps(response).encode())
+        await writer.drain()
+        writer.close()
+
+    async def start(self):
+        self._server = await asyncio.start_unix_server(self._handle, path=self.socket_path)
+
+    async def stop(self):
+        if self._server:
+            self._server.close()
+            await self._server.wait_closed()
 
 
-def test_client_rejects_invalid_mode():
+@pytest.fixture
+async def daemon():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        sock = os.path.join(tmpdir, "engram.sock")
+        d = FakeDaemon(sock)
+        d.set_response("engram.compress", {
+            "compressed": "c:expert|t:formal",
+            "original_tokens": 500,
+            "compressed_tokens": 12,
+        })
+        d.set_response("engram.deriveCodebook", {
+            "dimensions": [
+                {"key": "expertise", "type": "enum", "values": ["novice", "expert"]},
+            ],
+        })
+        d.set_response("engram.getStats", {
+            "sessions": 1,
+            "total_tokens_saved": 488,
+            "compression_ratio": 0.976,
+        })
+        d.set_response("engram.checkRedundancy", {
+            "redundant": False,
+            "patterns": [],
+        })
+        d.set_response("engram.generateReport", {
+            "report": "Session saved 488 tokens (97.6%)",
+        })
+        await d.start()
+        yield sock, d
+        await d.stop()
+
+
+@pytest.mark.asyncio
+async def test_compress(daemon):
+    sock, _ = daemon
+    client = await Engram.connect(sock)
+    result = await client.compress({"identity": "test", "history": [], "query": "hello"})
+    assert result["compressed"] == "c:expert|t:formal"
+    assert result["original_tokens"] == 500
+    await client.close()
+
+
+@pytest.mark.asyncio
+async def test_derive_codebook(daemon):
+    sock, _ = daemon
+    client = await Engram.connect(sock)
+    result = await client.derive_codebook("some content about expertise")
+    assert len(result["dimensions"]) == 1
+    assert result["dimensions"][0]["key"] == "expertise"
+    await client.close()
+
+
+@pytest.mark.asyncio
+async def test_get_stats(daemon):
+    sock, _ = daemon
+    client = await Engram.connect(sock)
+    result = await client.get_stats()
+    assert result["total_tokens_saved"] == 488
+    await client.close()
+
+
+@pytest.mark.asyncio
+async def test_check_redundancy(daemon):
+    sock, _ = daemon
+    client = await Engram.connect(sock)
+    result = await client.check_redundancy("some content")
+    assert result["redundant"] is False
+    await client.close()
+
+
+@pytest.mark.asyncio
+async def test_generate_report(daemon):
+    sock, _ = daemon
+    client = await Engram.connect(sock)
+    result = await client.generate_report()
+    assert "488" in result["report"]
+    await client.close()
+
+
+@pytest.mark.asyncio
+async def test_connect_missing_socket():
     with pytest.raises(EngramError):
-        Engram(mode="invalid")
-
-
-def test_client_embedded_mode_creates():
-    app = Engram(mode="embedded", auto_discover=False)
-    assert app.mode == "embedded"
-
-
-def test_client_hosted_mode_creates():
-    app = Engram(mode="hosted", url="https://example.com", api_key="key", auto_discover=False)
-    assert app.mode == "hosted"
-
-
-def test_client_accepts_plugins():
-    from engram.plugins.middleware import Middleware
-
-    class MW(Middleware):
-        order = 1
-        name = "test_mw"
-
-    app = Engram(mode="embedded", plugins=[MW()], auto_discover=False)
-    assert len(app._plugins["middleware"]) == 1
+        await Engram.connect("/tmp/nonexistent-engram-test.sock")
 
 
 @pytest.mark.asyncio
-async def test_embedded_session_raises_not_implemented():
-    """Embedded engine is a stub — session.query() should raise NotImplementedError."""
-    app = Engram(mode="embedded", auto_discover=False)
-    identity = TestCB(cuisine="thai")
-    async with app.session(identity=identity, provider="test", model="m") as session:
-        with pytest.raises(NotImplementedError):
-            await session.query("hello")
-
-
-@pytest.mark.asyncio
-async def test_hosted_session_raises_not_implemented():
-    app = Engram(mode="hosted", url="https://example.com", api_key="key", auto_discover=False)
-    identity = TestCB(cuisine="thai")
-    async with app.session(identity=identity, provider="test", model="m") as session:
-        with pytest.raises(NotImplementedError):
-            await session.query("hello")
+async def test_context_manager(daemon):
+    sock, _ = daemon
+    async with await Engram.connect(sock) as client:
+        result = await client.get_stats()
+        assert result["sessions"] == 1
