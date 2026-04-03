@@ -1,0 +1,15 @@
+{
+  "name": "engram",
+  "version": "0.2.0",
+  "description": "Node.js SDK for the Engram compression daemon",
+  "type": "module",
+  "main": "src/index.js",
+  "types": "src/index.d.ts",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "test": "node --test src/*.test.js"
+  }
+}
