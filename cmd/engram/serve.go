@@ -43,6 +43,11 @@ func newServeCmd() *cobra.Command {
 }
 
 func runServe(cmd *cobra.Command, args []string) error {
+	installDaemon, _ := cmd.Flags().GetBool("install-daemon")
+	if installDaemon {
+		return installService(cmd)
+	}
+
 	configPath, _ := cmd.Flags().GetString("config")
 	socketPath, _ := cmd.Flags().GetString("socket")
 

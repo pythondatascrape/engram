@@ -1,0 +1,12 @@
+[Unit]
+Description=Engram context compression daemon
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/engram serve --config ~/.engram/engram.yaml --socket ~/.engram/engram.sock
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

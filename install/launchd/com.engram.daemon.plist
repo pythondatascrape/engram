@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>com.engram.daemon</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/usr/local/bin/engram</string>
+		<string>serve</string>
+		<string>--config</string>
+		<string>~/.engram/engram.yaml</string>
+		<string>--socket</string>
+		<string>~/.engram/engram.sock</string>
+	</array>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>KeepAlive</key>
+	<true/>
+	<key>StandardOutPath</key>
+	<string>~/.engram/logs/engram.log</string>
+	<key>StandardErrorPath</key>
+	<string>~/.engram/logs/engram.err</string>
+</dict>
+</plist>
