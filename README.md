@@ -115,7 +115,7 @@ See the [Integration Guide](docs/integration-guide.md) for details.
 
 ## Demo
 
-See the [Vanilla Ice demo project](https://github.com/erikmeyer/vanilla-ice) for a working example that shows Engram compressing a real project's context from ~4,200 tokens to ~380 tokens.
+See the [Travelbound demo project](https://github.com/erikmeyer/travelbound) for a working example that shows Engram compressing a real project's context from ~4,200 tokens to ~380 tokens.
 
 ## Documentation
 
