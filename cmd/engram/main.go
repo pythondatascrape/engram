@@ -11,6 +11,7 @@ func main() {
 	rootCmd.AddCommand(newStatusCmd())
 	rootCmd.AddCommand(newVersionCmd())
 	rootCmd.AddCommand(newAnalyzeCmd())
+	rootCmd.AddCommand(newAdvisorCmd())
 	if err := rootCmd.Execute(); err != nil {
 		slog.Error("command failed", "error", err)
 		os.Exit(1)
