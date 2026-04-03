@@ -1,0 +1,13 @@
+{
+  "name": "engram",
+  "version": "0.2.0",
+  "description": "Identity-aware context compression for OpenClaw",
+  "type": "gateway",
+  "entrypoint": "adapter.go",
+  "hooks": {
+    "pre_request": "CompressContext"
+  },
+  "requires": {
+    "engram_daemon": "~/.engram/engram.sock"
+  }
+}
