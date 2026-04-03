@@ -3,8 +3,6 @@ package main
 import (
 	"log/slog"
 	"os"
-
-	"github.com/spf13/cobra"
 )
 
 func main() {
@@ -18,10 +16,3 @@ func main() {
 	}
 }
 
-func newServeCmd() *cobra.Command {
-	return &cobra.Command{Use: "serve", Short: "Start the Engram daemon"}
-}
-
-func newStatusCmd() *cobra.Command {
-	return &cobra.Command{Use: "status", Short: "Show Engram daemon status"}
-}

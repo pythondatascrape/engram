@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net"
 	"sync"
+	"time"
 
 	"github.com/pythondatascrape/engram/internal/server"
 	"github.com/pythondatascrape/engram/internal/session"
@@ -18,9 +19,11 @@ import (
 type Server struct {
 	listener *Listener
 	handler  *server.Handler
+	sessions *session.Manager
 	wg       sync.WaitGroup
 	ctx      context.Context
 	cancel   context.CancelFunc
+	started  time.Time
 }
 
 // NewServer creates a JSON-RPC server. handler may be nil for health-only mode.
@@ -31,7 +34,15 @@ func NewServer(listener *Listener, handler *server.Handler) *Server {
 		handler:  handler,
 		ctx:      ctx,
 		cancel:   cancel,
+		started:  time.Now(),
 	}
+}
+
+// NewServerWithSessions creates a JSON-RPC server with session tracking for health stats.
+func NewServerWithSessions(listener *Listener, handler *server.Handler, sessions *session.Manager) *Server {
+	s := NewServer(listener, handler)
+	s.sessions = sessions
+	return s
 }
 
 // Serve accepts connections in a loop until the server is stopped.
@@ -87,9 +98,16 @@ func (s *Server) handleConn(conn net.Conn) {
 func (s *Server) dispatch(req RPCRequest) RPCResponse {
 	switch req.Method {
 	case "health":
+		health := HealthResult{
+			Status: "ok",
+			Uptime: time.Since(s.started).Truncate(time.Second).String(),
+		}
+		if s.sessions != nil {
+			health.ActiveSessions = s.sessions.Count()
+		}
 		return RPCResponse{
 			JSONRPC: "2.0",
-			Result:  HealthResult{Status: "ok"},
+			Result:  health,
 			ID:      req.ID,
 		}
 	case "compress":

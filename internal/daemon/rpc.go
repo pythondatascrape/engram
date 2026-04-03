@@ -24,7 +24,11 @@ type RPCError struct {
 
 // HealthResult is the response payload for the "health" method.
 type HealthResult struct {
-	Status string `json:"status"`
+	Status         string `json:"status"`
+	Uptime         string `json:"uptime,omitempty"`
+	ActiveSessions int    `json:"active_sessions,omitempty"`
+	TotalTurns     int    `json:"total_turns,omitempty"`
+	TotalSaved     int    `json:"total_saved,omitempty"`
 }
 
 // CompressRequest is the params payload for the "compress" method.
