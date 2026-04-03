@@ -1,7 +1,7 @@
 // Package engram provides a thin client for the Engram compression daemon.
 //
-// The client connects to the daemon's Unix socket (~/.engram/engram.sock)
-// and sends JSON-RPC requests. All compression logic lives in the daemon.
+// The client holds a persistent Unix socket connection and reuses it
+// across calls, avoiding per-call connect/close overhead.
 //
 // Usage:
 //
@@ -19,6 +19,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"sync"
 	"sync/atomic"
 )
 
@@ -26,9 +27,12 @@ const defaultSocket = ".engram/engram.sock"
 
 var requestID atomic.Int64
 
-// Client communicates with the Engram daemon over a Unix socket.
+// Client communicates with the Engram daemon over a persistent Unix socket.
 type Client struct {
-	socketPath string
+	conn net.Conn
+	enc  *json.Encoder
+	dec  *json.Decoder
+	mu   sync.Mutex // serializes concurrent calls on the shared connection
 }
 
 type jsonRPCRequest struct {
@@ -50,7 +54,7 @@ type jsonRPCError struct {
 	Message string `json:"message"`
 }
 
-// Connect creates a new client connected to the Engram daemon.
+// Connect dials the Engram daemon and holds the connection open.
 // If socketPath is empty, it defaults to ~/.engram/engram.sock.
 func Connect(_ context.Context, socketPath string) (*Client, error) {
 	if socketPath == "" {
@@ -61,22 +65,21 @@ func Connect(_ context.Context, socketPath string) (*Client, error) {
 		socketPath = filepath.Join(home, defaultSocket)
 	}
 
-	// Verify the socket is connectable by dialing it.
 	conn, err := net.Dial("unix", socketPath)
 	if err != nil {
 		return nil, fmt.Errorf("engram: daemon not reachable: %w", err)
 	}
-	conn.Close()
 
-	return &Client{socketPath: socketPath}, nil
+	return &Client{
+		conn: conn,
+		enc:  json.NewEncoder(conn),
+		dec:  json.NewDecoder(conn),
+	}, nil
 }
 
-func (c *Client) call(ctx context.Context, method string, params any) (map[string]any, error) {
-	conn, err := net.Dial("unix", c.socketPath)
-	if err != nil {
-		return nil, fmt.Errorf("engram: connect failed: %w", err)
-	}
-	defer conn.Close()
+func (c *Client) call(_ context.Context, method string, params any) (map[string]any, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 
 	req := jsonRPCRequest{
 		JSONRPC: "2.0",
@@ -85,12 +88,12 @@ func (c *Client) call(ctx context.Context, method string, params any) (map[strin
 		Params:  params,
 	}
 
-	if err := json.NewEncoder(conn).Encode(req); err != nil {
+	if err := c.enc.Encode(req); err != nil {
 		return nil, fmt.Errorf("engram: write failed: %w", err)
 	}
 
 	var resp jsonRPCResponse
-	if err := json.NewDecoder(conn).Decode(&resp); err != nil {
+	if err := c.dec.Decode(&resp); err != nil {
 		return nil, fmt.Errorf("engram: read failed: %w", err)
 	}
 
@@ -131,8 +134,7 @@ func (c *Client) GenerateReport(ctx context.Context) (map[string]any, error) {
 	return c.call(ctx, "engram.generateReport", nil)
 }
 
-// Close disconnects from the daemon. Since each call opens a fresh connection,
-// this is a no-op but satisfies the interface contract.
+// Close closes the underlying connection to the daemon.
 func (c *Client) Close() error {
-	return nil
+	return c.conn.Close()
 }

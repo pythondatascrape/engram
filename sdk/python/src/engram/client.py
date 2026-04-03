@@ -21,38 +21,30 @@ def _next_id() -> int:
 class Engram:
     """Async client for the Engram compression daemon.
 
-    Usage:
-        client = await Engram.connect()
-        result = await client.compress({"identity": ..., "history": ..., "query": ...})
-        await client.close()
+    Holds a persistent Unix socket connection across calls.
 
-    Or as a context manager:
+    Usage:
         async with await Engram.connect() as client:
             result = await client.compress(...)
     """
 
-    def __init__(self, socket_path: str):
-        self._socket_path = socket_path
-        self._connected = False
+    def __init__(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
+        self._reader = reader
+        self._writer = writer
 
     @classmethod
     async def connect(cls, socket_path: Optional[str] = None) -> "Engram":
         path = socket_path or _DEFAULT_SOCKET
-        # Verify connectivity by opening and immediately closing a connection.
         try:
             reader, writer = await asyncio.open_unix_connection(path)
-            writer.close()
-            await writer.wait_closed()
         except (ConnectionRefusedError, FileNotFoundError, OSError) as e:
             raise EngramError(f"daemon not reachable: {e}") from e
 
-        client = cls(path)
-        client._connected = True
-        return client
+        return cls(reader, writer)
 
     async def _call(self, method: str, params: Optional[dict[str, Any]] = None) -> dict[str, Any]:
-        if not self._connected:
-            raise EngramError("client is not connected")
+        if self._writer is None:
+            raise EngramError("client is closed")
 
         request = {
             "jsonrpc": "2.0",
@@ -62,28 +54,22 @@ class Engram:
         }
 
         try:
-            reader, writer = await asyncio.open_unix_connection(self._socket_path)
-        except (ConnectionRefusedError, FileNotFoundError, OSError) as e:
-            raise EngramConnectionError(f"failed to connect to daemon: {e}") from e
+            self._writer.write(json.dumps(request).encode() + b"\n")
+            await self._writer.drain()
 
-        try:
-            writer.write(json.dumps(request).encode())
-            await writer.drain()
-
-            data = await reader.read(1 << 20)
-            if not data:
+            line = await self._reader.readline()
+            if not line:
                 raise EngramConnectionError("daemon closed connection without response")
 
-            response = json.loads(data.decode())
+            response = json.loads(line)
 
             if "error" in response:
                 err = response["error"]
                 raise EngramError(f"daemon error ({err.get('code', '?')}): {err.get('message', 'unknown')}")
 
             return response.get("result", {})
-        finally:
-            writer.close()
-            await writer.wait_closed()
+        except (ConnectionResetError, BrokenPipeError, OSError) as e:
+            raise EngramConnectionError(f"connection lost: {e}") from e
 
     async def compress(self, context: dict[str, Any]) -> dict[str, Any]:
         return await self._call("engram.compress", context)
@@ -101,7 +87,10 @@ class Engram:
         return await self._call("engram.generateReport")
 
     async def close(self) -> None:
-        self._connected = False
+        if self._writer is not None:
+            self._writer.close()
+            await self._writer.wait_closed()
+            self._writer = None
 
     async def __aenter__(self) -> "Engram":
         return self

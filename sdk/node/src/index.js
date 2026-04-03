@@ -1,9 +1,10 @@
 // Thin client for the Engram compression daemon.
-// Connects via Unix socket using JSON-RPC 2.0.
+// Holds a persistent Unix socket connection across calls.
 
 import { connect } from "node:net";
 import { homedir } from "node:os";
 import { join } from "node:path";
+
 const DEFAULT_SOCKET = join(homedir(), ".engram", "engram.sock");
 
 export class EngramError extends Error {
@@ -15,86 +16,106 @@ export class EngramError extends Error {
 }
 
 export class Engram {
-  #socketPath;
+  #conn;
   #requestId = 0;
+  #pending = new Map(); // id → { resolve, reject }
+  #buffer = "";
 
-  constructor(socketPath) {
-    this.#socketPath = socketPath;
-  }
+  constructor(conn) {
+    this.#conn = conn;
 
-  static async connect(socketPath) {
-    const sock = socketPath || DEFAULT_SOCKET;
-    // Verify connectivity by opening and immediately closing a connection.
-    await new Promise((resolve, reject) => {
-      const conn = connect(sock);
-      conn.on("connect", () => { conn.destroy(); resolve(); });
-      conn.on("error", (err) => reject(new EngramError(`daemon not reachable: ${err.message}`)));
+    conn.on("data", (chunk) => {
+      this.#buffer += chunk.toString();
+      let idx;
+      while ((idx = this.#buffer.indexOf("\n")) !== -1) {
+        const line = this.#buffer.slice(0, idx);
+        this.#buffer = this.#buffer.slice(idx + 1);
+        this.#handleLine(line);
+      }
     });
-    return new Engram(sock);
+
+    conn.on("error", (err) => {
+      for (const { reject } of this.#pending.values()) {
+        reject(new EngramError(`connection error: ${err.message}`));
+      }
+      this.#pending.clear();
+    });
+
+    conn.on("close", () => {
+      for (const { reject } of this.#pending.values()) {
+        reject(new EngramError("connection closed"));
+      }
+      this.#pending.clear();
+    });
   }
 
-  async #call(method, params) {
-    return new Promise((resolve, reject) => {
-      const conn = connect(this.#socketPath);
-      let buffer = "";
+  #handleLine(line) {
+    let resp;
+    try {
+      resp = JSON.parse(line);
+    } catch {
+      return;
+    }
+    const p = this.#pending.get(resp.id);
+    if (!p) return;
+    this.#pending.delete(resp.id);
+    if (resp.error) {
+      p.reject(new EngramError(resp.error.message, resp.error.code));
+    } else {
+      p.resolve(resp.result);
+    }
+  }
 
-      conn.on("connect", () => {
-        const req = JSON.stringify({
+  static connect(socketPath) {
+    const sock = socketPath || DEFAULT_SOCKET;
+    return new Promise((resolve, reject) => {
+      const conn = connect(sock);
+      conn.on("connect", () => resolve(new Engram(conn)));
+      conn.on("error", (err) =>
+        reject(new EngramError(`daemon not reachable: ${err.message}`))
+      );
+    });
+  }
+
+  #call(method, params) {
+    return new Promise((resolve, reject) => {
+      const id = ++this.#requestId;
+      this.#pending.set(id, { resolve, reject });
+      const req =
+        JSON.stringify({
           jsonrpc: "2.0",
-          id: ++this.#requestId,
+          id,
           method,
           params: params ?? null,
-        });
-        conn.write(req + "\n");
-      });
-
-      conn.on("data", (chunk) => {
-        buffer += chunk.toString();
-        const newlineIdx = buffer.indexOf("\n");
-        if (newlineIdx === -1) return;
-
-        const line = buffer.slice(0, newlineIdx);
-        conn.destroy();
-
-        try {
-          const resp = JSON.parse(line);
-          if (resp.error) {
-            reject(new EngramError(resp.error.message, resp.error.code));
-          } else {
-            resolve(resp.result);
-          }
-        } catch (err) {
-          reject(new EngramError(`invalid response: ${err.message}`));
-        }
-      });
-
-      conn.on("error", (err) => {
-        reject(new EngramError(`connection failed: ${err.message}`));
-      });
+        }) + "\n";
+      this.#conn.write(req);
     });
   }
 
-  async compress(context) {
+  compress(context) {
     return this.#call("engram.compress", context);
   }
 
-  async deriveCodebook(content) {
+  deriveCodebook(content) {
     return this.#call("engram.deriveCodebook", { content });
   }
 
-  async getStats() {
+  getStats() {
     return this.#call("engram.getStats");
   }
 
-  async checkRedundancy(content) {
+  checkRedundancy(content) {
     return this.#call("engram.checkRedundancy", { content });
   }
 
-  async generateReport() {
+  generateReport() {
     return this.#call("engram.generateReport");
   }
 
   async close() {
-    // Each call opens a fresh connection, so this is a no-op.
+    if (this.#conn) {
+      this.#conn.destroy();
+      this.#conn = null;
+    }
   }
 }

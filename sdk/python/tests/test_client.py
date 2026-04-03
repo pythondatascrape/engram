@@ -19,13 +19,16 @@ class FakeDaemon:
         self._responses[method] = result
 
     async def _handle(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
-        data = await reader.read(65536)
-        request = json.loads(data.decode())
-        method = request["method"]
-        result = self._responses.get(method, {})
-        response = {"jsonrpc": "2.0", "id": request["id"], "result": result}
-        writer.write(json.dumps(response).encode())
-        await writer.drain()
+        while True:
+            line = await reader.readline()
+            if not line:
+                break
+            request = json.loads(line)
+            method = request["method"]
+            result = self._responses.get(method, {})
+            response = {"jsonrpc": "2.0", "id": request["id"], "result": result}
+            writer.write(json.dumps(response).encode() + b"\n")
+            await writer.drain()
         writer.close()
 
     async def start(self):

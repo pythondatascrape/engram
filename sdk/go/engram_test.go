@@ -16,7 +16,7 @@ type fakeDaemon struct {
 	responses map[string]json.RawMessage
 }
 
-func newFakeDaemon(t *testing.T) (*fakeDaemon, string) {
+func newFakeDaemon(t testing.TB) (*fakeDaemon, string) {
 	t.Helper()
 	dir := t.TempDir()
 	sock := filepath.Join(dir, "engram.sock")
