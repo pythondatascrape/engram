@@ -1,19 +1,21 @@
 package daemon
 
+import "encoding/json"
+
 // RPCRequest is a JSON-RPC 2.0 request object.
 type RPCRequest struct {
 	JSONRPC string      `json:"jsonrpc"`
 	Method  string      `json:"method"`
-	Params  interface{} `json:"params,omitempty"`
+	Params  json.RawMessage `json:"params,omitempty"`
 	ID      interface{} `json:"id"`
 }
 
 // RPCResponse is a JSON-RPC 2.0 response object.
 type RPCResponse struct {
-	JSONRPC string      `json:"jsonrpc"`
-	Result  interface{} `json:"result,omitempty"`
-	Error   *RPCError   `json:"error,omitempty"`
-	ID      interface{} `json:"id"`
+	JSONRPC string          `json:"jsonrpc"`
+	Result  json.RawMessage `json:"result,omitempty"`
+	Error   *RPCError       `json:"error,omitempty"`
+	ID      interface{}     `json:"id"`
 }
 
 // RPCError represents a JSON-RPC 2.0 error.

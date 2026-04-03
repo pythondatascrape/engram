@@ -95,6 +95,11 @@ func (s *Server) handleConn(conn net.Conn) {
 	}
 }
 
+func mustMarshal(v interface{}) json.RawMessage {
+	b, _ := json.Marshal(v)
+	return b
+}
+
 func (s *Server) dispatch(req RPCRequest) RPCResponse {
 	switch req.Method {
 	case "health":
@@ -107,7 +112,7 @@ func (s *Server) dispatch(req RPCRequest) RPCResponse {
 		}
 		return RPCResponse{
 			JSONRPC: "2.0",
-			Result:  health,
+			Result:  mustMarshal(health),
 			ID:      req.ID,
 		}
 	case "compress":
@@ -130,17 +135,8 @@ func (s *Server) handleCompress(req RPCRequest) RPCResponse {
 		}
 	}
 
-	paramsBytes, err := json.Marshal(req.Params)
-	if err != nil {
-		return RPCResponse{
-			JSONRPC: "2.0",
-			Error:   &RPCError{Code: -32602, Message: "invalid params"},
-			ID:      req.ID,
-		}
-	}
-
 	var cr CompressRequest
-	if err := json.Unmarshal(paramsBytes, &cr); err != nil {
+	if err := json.Unmarshal(req.Params, &cr); err != nil {
 		return RPCResponse{
 			JSONRPC: "2.0",
 			Error:   &RPCError{Code: -32602, Message: "invalid params: " + err.Error()},
@@ -171,11 +167,11 @@ func (s *Server) handleCompress(req RPCRequest) RPCResponse {
 
 	return RPCResponse{
 		JSONRPC: "2.0",
-		Result: CompressResult{
+		Result: mustMarshal(CompressResult{
 			SessionID:   resp.SessionID,
 			FullText:    resp.FullText,
 			TotalTokens: resp.TotalTokens,
-		},
+		}),
 		ID: req.ID,
 	}
 }

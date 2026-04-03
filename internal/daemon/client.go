@@ -41,9 +41,8 @@ func (c *Client) Health() (*HealthResult, error) {
 	if resp.Error != nil {
 		return nil, fmt.Errorf("daemon: health error %d: %s", resp.Error.Code, resp.Error.Message)
 	}
-	resultBytes, _ := json.Marshal(resp.Result)
 	var health HealthResult
-	if err := json.Unmarshal(resultBytes, &health); err != nil {
+	if err := json.Unmarshal(resp.Result, &health); err != nil {
 		return nil, fmt.Errorf("daemon: unmarshal health: %w", err)
 	}
 	return &health, nil
@@ -52,7 +51,8 @@ func (c *Client) Health() (*HealthResult, error) {
 // Compress sends a compress RPC and returns the result.
 func (c *Client) Compress(req *CompressRequest) (*CompressResult, error) {
 	c.id++
-	rpcReq := RPCRequest{JSONRPC: "2.0", Method: "compress", Params: req, ID: c.id}
+	params, _ := json.Marshal(req)
+	rpcReq := RPCRequest{JSONRPC: "2.0", Method: "compress", Params: params, ID: c.id}
 	if err := c.enc.Encode(rpcReq); err != nil {
 		return nil, fmt.Errorf("daemon: send compress request: %w", err)
 	}
@@ -63,9 +63,8 @@ func (c *Client) Compress(req *CompressRequest) (*CompressResult, error) {
 	if resp.Error != nil {
 		return nil, fmt.Errorf("daemon: compress error %d: %s", resp.Error.Code, resp.Error.Message)
 	}
-	resultBytes, _ := json.Marshal(resp.Result)
 	var result CompressResult
-	if err := json.Unmarshal(resultBytes, &result); err != nil {
+	if err := json.Unmarshal(resp.Result, &result); err != nil {
 		return nil, fmt.Errorf("daemon: unmarshal compress result: %w", err)
 	}
 	return &result, nil

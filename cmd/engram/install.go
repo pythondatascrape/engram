@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"os/exec"
@@ -9,6 +10,11 @@ import (
 	"text/template"
 
 	"github.com/spf13/cobra"
+)
+
+var (
+	launchdTmpl = template.Must(template.New("plist").Parse(launchdPlistTemplate))
+	systemdTmpl = template.Must(template.New("unit").Parse(systemdUnitTemplate))
 )
 
 const launchdPlistTemplate = `<?xml version="1.0" encoding="UTF-8"?>
@@ -59,41 +65,27 @@ type serviceTemplateData struct {
 	LogDir     string
 }
 
+func renderTemplate(tmpl *template.Template, data serviceTemplateData) string {
+	var buf bytes.Buffer
+	_ = tmpl.Execute(&buf, data)
+	return buf.String()
+}
+
 func generateLaunchdPlist(binary, configPath, socketPath string) string {
-	logDir := filepath.Join(filepath.Dir(configPath), "logs")
-	data := serviceTemplateData{
+	return renderTemplate(launchdTmpl, serviceTemplateData{
 		Binary:     binary,
 		ConfigPath: configPath,
 		SocketPath: socketPath,
-		LogDir:     logDir,
-	}
-	tmpl := template.Must(template.New("plist").Parse(launchdPlistTemplate))
-	var buf []byte
-	w := &byteWriter{buf: &buf}
-	_ = tmpl.Execute(w, data)
-	return string(*w.buf)
+		LogDir:     filepath.Join(filepath.Dir(configPath), "logs"),
+	})
 }
 
 func generateSystemdUnit(binary, configPath, socketPath string) string {
-	data := serviceTemplateData{
+	return renderTemplate(systemdTmpl, serviceTemplateData{
 		Binary:     binary,
 		ConfigPath: configPath,
 		SocketPath: socketPath,
-	}
-	tmpl := template.Must(template.New("unit").Parse(systemdUnitTemplate))
-	var buf []byte
-	w := &byteWriter{buf: &buf}
-	_ = tmpl.Execute(w, data)
-	return string(*w.buf)
-}
-
-type byteWriter struct {
-	buf *[]byte
-}
-
-func (w *byteWriter) Write(p []byte) (int, error) {
-	*w.buf = append(*w.buf, p...)
-	return len(p), nil
+	})
 }
 
 func writeServiceFile(path, content string) error {

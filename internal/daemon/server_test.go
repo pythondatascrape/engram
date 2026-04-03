@@ -97,7 +97,7 @@ func TestServer_CompressWithoutHandler(t *testing.T) {
 	resp := dialAndSend(t, sockPath, RPCRequest{
 		JSONRPC: "2.0",
 		Method:  "compress",
-		Params:  map[string]interface{}{"query": "hello"},
+		Params:  mustMarshal(map[string]interface{}{"query": "hello"}),
 		ID:      float64(3),
 	})
 
