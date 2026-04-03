@@ -32,12 +32,9 @@ func newBenchDaemon(b *testing.B) (*fakeDaemon, string) {
 	return d, sock
 }
 
-func BenchmarkGetStats_PersistentConn(b *testing.B) {
+func BenchmarkGetStats_Serial(b *testing.B) {
 	d, sock := newBenchDaemon(b)
-	d.setResponse("engram.getStats", map[string]any{
-		"sessions":           1,
-		"total_tokens_saved": 488,
-	})
+	d.setResponse("engram.getStats", map[string]any{"sessions": 1})
 	go d.serve()
 	defer d.close()
 
@@ -50,9 +47,31 @@ func BenchmarkGetStats_PersistentConn(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, err = client.GetStats(ctx)
-		if err != nil {
+		if _, err := client.GetStats(ctx); err != nil {
 			b.Fatal(err)
 		}
 	}
+}
+
+func BenchmarkGetStats_Parallel(b *testing.B) {
+	d, sock := newBenchDaemon(b)
+	d.setResponse("engram.getStats", map[string]any{"sessions": 1})
+	go d.serve()
+	defer d.close()
+
+	ctx := context.Background()
+	client, err := engram.Connect(ctx, sock)
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer client.Close()
+
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			if _, err := client.GetStats(ctx); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
 }
