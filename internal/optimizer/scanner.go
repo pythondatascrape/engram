@@ -43,7 +43,14 @@ var identityFileNames = []string{
 	".github/copilot-instructions.md",
 }
 
-// ScanProject scans a directory and returns a ProjectProfile.
+// skipDirs are directories that should not be walked for identity files.
+var skipDirs = map[string]bool{
+	".git": true, ".claude": true, ".github": true, ".venv": true,
+	"node_modules": true, "__pycache__": true, "vendor": true,
+	"dist": true, ".worktrees": true, ".next": true,
+}
+
+// ScanProject scans a directory tree and returns a ProjectProfile.
 func ScanProject(dir string) (*ProjectProfile, error) {
 	info, err := os.Stat(dir)
 	if err != nil {
@@ -56,24 +63,59 @@ func ScanProject(dir string) (*ProjectProfile, error) {
 	profile := &ProjectProfile{Dir: dir}
 	profile.Type = detectProjectType(dir)
 
-	for _, name := range identityFileNames {
+	// Check root-only files (dotfile paths that don't repeat in subdirs).
+	for _, name := range rootOnlyFiles {
 		path := filepath.Join(dir, name)
-		data, err := os.ReadFile(path)
-		if err != nil {
-			continue
+		if idf, ok := readIdentityFile(dir, path, name); ok {
+			profile.IdentityFiles = append(profile.IdentityFiles, idf)
+			profile.TotalTokens += idf.TokenCount
 		}
-		tokens := estimateTokens(string(data))
-		idf := IdentityFile{
-			Name:       name,
-			Path:       path,
-			TokenCount: tokens,
-			SizeBytes:  len(data),
-		}
-		profile.IdentityFiles = append(profile.IdentityFiles, idf)
-		profile.TotalTokens += tokens
 	}
 
+	// Walk the tree for files that can appear at any level.
+	filepath.Walk(dir, func(path string, fi os.FileInfo, err error) error {
+		if err != nil {
+			return nil
+		}
+		if fi.IsDir() {
+			if skipDirs[fi.Name()] {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		for _, name := range recursiveFileNames {
+			if fi.Name() == name {
+				rel, _ := filepath.Rel(dir, path)
+				if idf, ok := readIdentityFile(dir, path, rel); ok {
+					profile.IdentityFiles = append(profile.IdentityFiles, idf)
+					profile.TotalTokens += idf.TokenCount
+				}
+			}
+		}
+		return nil
+	})
+
 	return profile, nil
+}
+
+// recursiveFileNames are identity files that can appear at any directory level.
+var recursiveFileNames = []string{"CLAUDE.md", "AGENTS.md", ".cursorrules"}
+
+// rootOnlyFiles are identity files checked only at the project root.
+var rootOnlyFiles = []string{".claude/CLAUDE.md", ".github/copilot-instructions.md"}
+
+func readIdentityFile(dir, path, name string) (IdentityFile, bool) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return IdentityFile{}, false
+	}
+	tokens := estimateTokens(string(data))
+	return IdentityFile{
+		Name:       name,
+		Path:       path,
+		TokenCount: tokens,
+		SizeBytes:  len(data),
+	}, true
 }
 
 func detectProjectType(dir string) ProjectType {
