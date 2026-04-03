@@ -167,11 +167,16 @@ func (h *Handler) HandleRequest(ctx context.Context, req IncomingRequest) (Respo
 
 	var ctxCodebookDef, respCodebookDef string
 	if rctx.ContextCodebook != nil {
-		ctxCodebookDef = rctx.ContextCodebook.Definition()
-		if sess.Opts.Provider == "openai" {
-			respCodebookDef = engramctx.OpenAIResponseCodebook().Definition()
-		} else {
-			respCodebookDef = engramctx.AnthropicResponseCodebook().Definition()
+		// Only inject codebook definitions on the first turn; the LLM retains
+		// them in context for subsequent turns, saving ~197 bytes per turn.
+		firstTurn := rctx.History == nil || rctx.History.Len() == 0
+		if firstTurn {
+			ctxCodebookDef = rctx.ContextCodebook.Definition()
+			if sess.Opts.Provider == "openai" {
+				respCodebookDef = engramctx.OpenAIResponseCodebook().Definition()
+			} else {
+				respCodebookDef = engramctx.AnthropicResponseCodebook().Definition()
+			}
 		}
 	}
 
