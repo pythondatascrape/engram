@@ -76,37 +76,78 @@ engram status
 
 ---
 
-## Python SDK
+## SDKs
 
-For custom integrations or programmatic access, use the Python SDK.
+All SDKs are thin JSON-RPC clients that connect to the local Engram daemon over a Unix socket. The daemon must be running (`engram serve`).
 
-### Installation
+### Python
+
+**Requirements:** Python 3.11+, Engram daemon running
 
 ```bash
-pip install engram-sdk
+pip install engram
 ```
-
-### Basic Usage
 
 ```python
 from engram import Engram
 
-# Connect to the local Engram daemon
-client = Engram()
+async with await Engram.connect() as client:
+    # Compress context before sending to an LLM
+    result = await client.compress({
+        "identity": "...",
+        "history": [],
+        "query": "hello",
+    })
 
-# Compress context before sending to an LLM
-compressed = client.compress(context)
-
-# Get session statistics
-stats = client.stats()
-print(f"Tokens saved: {stats.tokens_saved}")
-print(f"Savings rate: {stats.savings_rate}%")
+    # Get session statistics
+    stats = await client.get_stats()
+    print(f"Tokens saved: {stats['total_tokens_saved']}")
 ```
 
-### Requirements
+### Go
 
-- Python 3.10+
-- Engram daemon running locally (`engram serve`)
+**Requirements:** Go 1.22+, Engram daemon running
+
+```go
+import engram "github.com/pythondatascrape/engram/sdk/go"
+
+client, err := engram.Connect(ctx, "") // empty string = default socket
+if err != nil { log.Fatal(err) }
+defer client.Close()
+
+result, err := client.Compress(ctx, map[string]any{
+    "identity": "...",
+    "history":  []any{},
+    "query":    "hello",
+})
+
+stats, err := client.GetStats(ctx)
+```
+
+### Node.js
+
+**Requirements:** Node.js 18+, Engram daemon running
+
+```bash
+npm install engram
+```
+
+```javascript
+import { Engram } from "engram";
+
+const client = await Engram.connect();
+
+const result = await client.compress({
+    identity: "...",
+    history: [],
+    query: "hello",
+});
+
+const stats = await client.getStats();
+console.log(`Tokens saved: ${stats.total_tokens_saved}`);
+
+await client.close();
+```
 
 ---
 

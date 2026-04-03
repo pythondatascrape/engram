@@ -7,14 +7,15 @@ Engram provides a single binary with subcommands for setup, analysis, and operat
 | Flag | Description |
 |------|-------------|
 | `--config <path>` | Path to configuration file (default: `engram.yaml`) |
-| `--version` | Print version and exit |
-| `--help` | Show help text |
+| `--socket <path>` | Unix socket path (default: `~/.engram/engram.sock`) |
+| `-v, --version` | Print version and exit |
+| `-h, --help` | Show help text |
 
 ---
 
 ## engram install
 
-Interactive setup wizard for your project.
+Auto-detects installed AI clients and installs the Engram compression plugin.
 
 ```bash
 engram install [flags]
@@ -22,36 +23,50 @@ engram install [flags]
 
 | Flag | Description |
 |------|-------------|
-| `--non-interactive` | Skip prompts, use defaults |
-| `--tools <list>` | Comma-separated list of tools to configure (e.g., `claude-code,openclaw`) |
+| `--claude-code` | Install Claude Code plugin only |
+| `--openclaw` | Install OpenClaw plugin only |
+| `--source <dir>` | Override plugin source directory |
 
 **What it does:**
-- Scans the current directory for project structure
-- Detects installed AI coding tools
-- Generates an initial identity codebook
+- Detects installed AI coding tools (Claude Code, OpenClaw)
 - Registers Engram as a plugin for detected tools
-- Creates `engram.yaml` if it doesn't exist
+- Copies plugin files to the appropriate configuration directory
 
 ---
 
 ## engram analyze
 
-Analyze your project and show compression opportunities.
+Analyze your project and show compression opportunities with estimated savings.
 
 ```bash
-engram analyze [flags]
+engram analyze [directory] [flags]
 ```
 
 | Flag | Description |
 |------|-------------|
-| `--format <fmt>` | Output format: `text` (default), `json` |
-| `--verbose` | Show per-file breakdown |
+| `--sessions <n>` | Override sessions per day (default: 50) |
+| `--cost <n>` | Override cost per million input tokens (default: $3.00) |
+| `-y, --yes` | Auto-accept all optimizations |
 
 **What it does:**
-- Scans project files and structure
-- Calculates identity token counts (compressed vs. uncompressed)
-- Identifies context patterns and redundancy
-- Reports estimated savings per session
+- Scans project files for identity files (CLAUDE.md, AGENTS.md, etc.)
+- Estimates token savings from Engram compression
+- Presents a prioritized report with monthly dollar savings
+
+---
+
+## engram advisor
+
+Show optimization recommendations based on actual session data.
+
+```bash
+engram advisor [directory]
+```
+
+**What it does:**
+- Reads accumulated session data for a project
+- Analyzes compression patterns and efficiency
+- Shows actionable recommendations for improving savings
 
 ---
 
@@ -65,13 +80,12 @@ engram serve [flags]
 
 | Flag | Description |
 |------|-------------|
-| `--foreground` | Run in foreground (don't daemonize) |
-| `--port <port>` | Listen port (default: 7600) |
-| `--config <path>` | Path to config file |
+| `--socket <path>` | Unix socket path (default: `~/.engram/engram.sock`) |
+| `--install-daemon` | Install as a system daemon (launchd on macOS, systemd on Linux) |
 
 **What it does:**
 - Starts the compression daemon
-- Listens for connections from AI tools
+- Listens on a Unix socket for JSON-RPC requests
 - Compresses context in real time for active sessions
 
 ---
@@ -86,29 +100,9 @@ engram status [flags]
 
 | Flag | Description |
 |------|-------------|
-| `--format <fmt>` | Output format: `text` (default), `json` |
+| `--socket <path>` | Unix socket path (default: `~/.engram/engram.sock`) |
 
 **What it does:**
 - Shows whether the daemon is running
-- Displays active session count
+- Displays active session count and uptime
 - Reports total tokens saved and current savings rate
-
----
-
-## engram update
-
-Update codebooks and configuration.
-
-```bash
-engram update [flags]
-```
-
-| Flag | Description |
-|------|-------------|
-| `--codebooks` | Update codebooks only |
-| `--config` | Regenerate config from current project state |
-
-**What it does:**
-- Re-scans the project for changes
-- Updates codebooks to reflect current project structure
-- Applies any configuration updates

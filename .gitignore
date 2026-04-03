@@ -33,7 +33,7 @@ __pycache__/
 gen/
 api.txt
 
-docs/
+docs/superpowers/
 
 # Worktrees
 .worktrees/

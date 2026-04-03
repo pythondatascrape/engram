@@ -42,9 +42,9 @@ engram serve
 |---------|-------------|
 | `engram install` | Interactive setup — detects your tools, configures integration |
 | `engram analyze` | Analyze your project and show compression opportunities |
+| `engram advisor` | Show optimization recommendations based on session data |
 | `engram serve` | Start the compression daemon |
 | `engram status` | Show daemon status, active sessions, and savings |
-| `engram update` | Update codebooks and configuration |
 
 Every command supports `--help` for detailed usage.
 
@@ -68,19 +68,31 @@ engram install
 # Engram auto-detects OpenClaw and configures the integration
 ```
 
-### SDK
+### SDKs
 
-For custom integrations, use the Python SDK:
+For custom integrations, Engram provides thin client SDKs in three languages. All connect to the local daemon over a Unix socket.
 
-```bash
-pip install engram-sdk
-```
-
+**Python:**
 ```python
 from engram import Engram
 
-client = Engram()
-compressed = client.compress(context)
+async with await Engram.connect() as client:
+    result = await client.compress({"identity": "...", "history": [], "query": "..."})
+```
+
+**Go:**
+```go
+client, _ := engram.Connect(ctx, "")
+defer client.Close()
+result, _ := client.Compress(ctx, map[string]any{...})
+```
+
+**Node.js:**
+```javascript
+import { Engram } from "engram";
+
+const client = await Engram.connect();
+const result = await client.compress({identity: "...", history: [], query: "..."});
 ```
 
 See the [Integration Guide](docs/integration-guide.md) for details.
