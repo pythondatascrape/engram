@@ -22,8 +22,15 @@ Engram eliminates it. It runs locally as a lightweight daemon, learns your devel
 ## Quick Start
 
 ```bash
-# Install
-brew install engram
+# Install via Homebrew (macOS/Linux)
+brew install pythondatascrape/tap/engram
+
+# Or download a release binary
+curl -fsSL https://github.com/pythondatascrape/engram/releases/latest/download/engram_$(uname -s | tr A-Z a-z)_$(uname -m | sed 's/x86_64/amd64/').tar.gz | tar xz
+sudo mv engram /usr/local/bin/
+
+# Or install from source
+go install github.com/pythondatascrape/engram/cmd/engram@latest
 
 # Set up Engram for your project
 cd your-project
@@ -106,6 +113,7 @@ See the [Vanilla Ice demo project](https://github.com/erikmeyer/vanilla-ice) for
 - [Getting Started](docs/getting-started.md) — Install and configure Engram for your first project
 - [CLI Reference](docs/cli-reference.md) — Full command documentation with examples
 - [Integration Guide](docs/integration-guide.md) — Configure Claude Code, OpenClaw, and SDK setup
+- [Changelog](CHANGELOG.md) — Release history
 
 ## License
 

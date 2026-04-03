@@ -9,6 +9,12 @@
   "engines": {
     "node": ">=18"
   },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/pythondatascrape/engram.git",
+    "directory": "sdk/node"
+  },
+  "keywords": ["engram", "compression", "llm", "context", "ai"],
   "scripts": {
     "test": "node --test src/*.test.js"
   }

@@ -19,6 +19,14 @@ archives:
 checksum:
   name_template: "checksums.txt"
 
+brews:
+  - repository:
+      owner: pythondatascrape
+      name: homebrew-tap
+    homepage: "https://github.com/pythondatascrape/engram"
+    description: "Local-first context compression for AI coding tools"
+    license: "Apache-2.0"
+
 changelog:
   sort: asc
   filters:
