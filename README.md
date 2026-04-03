@@ -8,14 +8,23 @@
 
 Every time an AI coding tool sends a request to an LLM, it re-sends the same context: who you are, what you're working on, your preferences, your project structure. This redundancy costs real money and eats into context windows.
 
-Engram eliminates it. It runs locally as a lightweight daemon, learns your development identity and project context, and compresses redundant information out of every LLM call. The result: dramatically smaller prompts, lower costs, and more room in the context window for what actually matters.
+Engram eliminates it. It runs locally as a lightweight daemon and compresses both your **identity** (CLAUDE.md, system prompts, project instructions) and your **conversation context** (message history, tool results, responses) across every LLM call. The result: dramatically smaller prompts, lower costs, and more room in the context window for what actually matters.
+
+### How It Works
+
+Engram applies three compression stages:
+
+1. **Identity compression** — Verbose CLAUDE.md prose and project instructions are reduced to compact `key=value` codebook entries. Definitions are sent once on the first turn; subsequent turns reference keys only.
+2. **Context compression** — Conversation history is serialized using a learned codebook that strips JSON overhead from message objects (`role=user content=...` instead of full JSON).
+3. **Response compression** — LLM responses are compressed using provider-specific codebooks tuned to Anthropic and OpenAI output patterns.
 
 ### Key Numbers
 
 | Metric | Value |
 |--------|-------|
-| Identity compression | ~96% token reduction |
-| Overall context savings | 85-93% per session |
+| Identity compression | ~96-98% token reduction |
+| Context compression | ~40-60% token reduction |
+| Overall savings | 85-93% per session |
 | Startup overhead | <50ms |
 | Memory footprint | ~30MB resident |
 
