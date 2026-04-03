@@ -22,7 +22,6 @@ const (
 type IdentityFile struct {
 	Name       string // relative path from project root
 	Path       string // absolute path
-	Content    string // raw file content
 	TokenCount int    // estimated token count (chars / 4)
 	SizeBytes  int    // raw byte size
 }
@@ -67,7 +66,6 @@ func ScanProject(dir string) (*ProjectProfile, error) {
 		idf := IdentityFile{
 			Name:       name,
 			Path:       path,
-			Content:    string(data),
 			TokenCount: tokens,
 			SizeBytes:  len(data),
 		}
