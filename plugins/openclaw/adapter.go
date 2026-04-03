@@ -5,6 +5,7 @@
 package openclaw
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -18,17 +19,22 @@ import (
 type Adapter struct {
 	socketPath string
 	conn       net.Conn
+	scanner    *bufio.Scanner
 	mu         sync.Mutex
 	nextID     int
 }
 
-// New creates a new OpenClaw adapter.
-func New() *Adapter {
-	home, _ := os.UserHomeDir()
+// New creates a new OpenClaw adapter. Returns an error if the home directory
+// cannot be determined.
+func New() (*Adapter, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, fmt.Errorf("cannot determine home directory: %w", err)
+	}
 	return &Adapter{
 		socketPath: filepath.Join(home, ".engram", "engram.sock"),
 		nextID:     1,
-	}
+	}, nil
 }
 
 // Connect establishes a connection to the engram daemon.
@@ -42,6 +48,8 @@ func (a *Adapter) Connect(ctx context.Context) error {
 		return fmt.Errorf("connect to engram daemon: %w", err)
 	}
 	a.conn = conn
+	a.scanner = bufio.NewScanner(conn)
+	a.scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	return nil
 }
 
@@ -73,10 +81,11 @@ func (a *Adapter) CompressContext(ctx context.Context, content string) (string, 
 		return "", fmt.Errorf("send request: %w", err)
 	}
 
-	buf := make([]byte, 64*1024)
-	n, err := a.conn.Read(buf)
-	if err != nil {
-		return "", fmt.Errorf("read response: %w", err)
+	if !a.scanner.Scan() {
+		if err := a.scanner.Err(); err != nil {
+			return "", fmt.Errorf("read response: %w", err)
+		}
+		return "", fmt.Errorf("read response: connection closed")
 	}
 
 	var resp struct {
@@ -88,7 +97,7 @@ func (a *Adapter) CompressContext(ctx context.Context, content string) (string, 
 		} `json:"error"`
 	}
 
-	if err := json.Unmarshal(buf[:n], &resp); err != nil {
+	if err := json.Unmarshal(a.scanner.Bytes(), &resp); err != nil {
 		return "", fmt.Errorf("unmarshal response: %w", err)
 	}
 
@@ -107,6 +116,7 @@ func (a *Adapter) Close() error {
 	if a.conn != nil {
 		err := a.conn.Close()
 		a.conn = nil
+		a.scanner = nil
 		return err
 	}
 	return nil

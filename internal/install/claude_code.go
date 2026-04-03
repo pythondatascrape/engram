@@ -1,7 +1,6 @@
 package install
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"io/fs"
@@ -9,18 +8,6 @@ import (
 	"os"
 	"path/filepath"
 )
-
-// ClaudeCodeConfig represents the relevant portion of ~/.claude/settings.json.
-type ClaudeCodeConfig struct {
-	Plugins []ClaudeCodePlugin `json:"plugins,omitempty"`
-}
-
-// ClaudeCodePlugin represents a single plugin entry in Claude Code's config.
-type ClaudeCodePlugin struct {
-	Name    string `json:"name"`
-	Version string `json:"version"`
-	Path    string `json:"path"`
-}
 
 // RegisterClaudeCode installs the engram plugin into Claude Code.
 // It copies plugin files from sourceDir to ~/.claude/plugins/cache/engram/engram/<version>/.
@@ -101,18 +88,3 @@ func copyFile(src, dst string) error {
 	return out.Chmod(info.Mode())
 }
 
-func readClaudeCodeConfig(path string) (*ClaudeCodeConfig, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return &ClaudeCodeConfig{}, nil
-		}
-		return nil, err
-	}
-
-	var cfg ClaudeCodeConfig
-	if err := json.Unmarshal(data, &cfg); err != nil {
-		return nil, fmt.Errorf("parse settings: %w", err)
-	}
-	return &cfg, nil
-}

@@ -54,6 +54,11 @@ export class DaemonClient extends EventEmitter {
 
       this.#socket.on('close', () => {
         this.#connected = false;
+        for (const [, entry] of this.#pending) {
+          clearTimeout(entry.timer);
+          entry.reject(new Error('Socket closed'));
+        }
+        this.#pending.clear();
         this.emit('disconnected');
       });
     });

@@ -45,20 +45,3 @@ func TestCopyDir_SkipsNodeModules(t *testing.T) {
 	assert.Equal(t, "// main", string(data))
 }
 
-func TestReadClaudeCodeConfig_Missing(t *testing.T) {
-	cfg, err := readClaudeCodeConfig("/nonexistent/settings.json")
-	require.NoError(t, err)
-	assert.NotNil(t, cfg)
-	assert.Empty(t, cfg.Plugins)
-}
-
-func TestReadClaudeCodeConfig_Valid(t *testing.T) {
-	tmp := t.TempDir()
-	path := filepath.Join(tmp, "settings.json")
-	require.NoError(t, os.WriteFile(path, []byte(`{"plugins":[{"name":"engram","version":"0.1.0","path":"/foo"}]}`), 0o644))
-
-	cfg, err := readClaudeCodeConfig(path)
-	require.NoError(t, err)
-	assert.Len(t, cfg.Plugins, 1)
-	assert.Equal(t, "engram", cfg.Plugins[0].Name)
-}
