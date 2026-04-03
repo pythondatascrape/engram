@@ -117,6 +117,16 @@ func (s *Server) dispatch(req RPCRequest) RPCResponse {
 		}
 	case "compress":
 		return s.handleCompress(req)
+	case "engram.deriveCodebook":
+		return s.handleEngram(req, s.engramDeriveCodebook)
+	case "engram.compressIdentity":
+		return s.handleEngram(req, s.engramCompressIdentity)
+	case "engram.checkRedundancy":
+		return s.handleEngram(req, s.engramCheckRedundancy)
+	case "engram.getStats":
+		return s.handleEngram(req, s.engramGetStats)
+	case "engram.generateReport":
+		return s.handleEngram(req, s.engramGenerateReport)
 	default:
 		return RPCResponse{
 			JSONRPC: "2.0",
@@ -174,4 +184,81 @@ func (s *Server) handleCompress(req RPCRequest) RPCResponse {
 		}),
 		ID: req.ID,
 	}
+}
+
+// engramHandler processes params and returns a result or error.
+type engramHandler func(params json.RawMessage) (interface{}, error)
+
+func (s *Server) handleEngram(req RPCRequest, fn engramHandler) RPCResponse {
+	result, err := fn(req.Params)
+	if err != nil {
+		return RPCResponse{
+			JSONRPC: "2.0",
+			Error:   &RPCError{Code: -32000, Message: err.Error()},
+			ID:      req.ID,
+		}
+	}
+	return RPCResponse{
+		JSONRPC: "2.0",
+		Result:  mustMarshal(result),
+		ID:      req.ID,
+	}
+}
+
+func (s *Server) engramDeriveCodebook(params json.RawMessage) (interface{}, error) {
+	var p struct {
+		Content string `json:"content"`
+	}
+	if err := json.Unmarshal(params, &p); err != nil {
+		return nil, fmt.Errorf("invalid params: %w", err)
+	}
+	if p.Content == "" {
+		return nil, fmt.Errorf("content is required")
+	}
+	// Stub — full implementation will integrate with codebook.Parse
+	return map[string]interface{}{
+		"status":  "derived",
+		"message": "Codebook derivation via daemon not yet wired to compression pipeline",
+	}, nil
+}
+
+func (s *Server) engramCompressIdentity(params json.RawMessage) (interface{}, error) {
+	return map[string]interface{}{
+		"status":  "stub",
+		"message": "Identity compression via daemon not yet wired to compression pipeline",
+	}, nil
+}
+
+func (s *Server) engramCheckRedundancy(params json.RawMessage) (interface{}, error) {
+	var p struct {
+		Content string `json:"content"`
+	}
+	if err := json.Unmarshal(params, &p); err != nil {
+		return nil, fmt.Errorf("invalid params: %w", err)
+	}
+	if p.Content == "" {
+		return nil, fmt.Errorf("content is required")
+	}
+	return map[string]interface{}{
+		"redundant": false,
+		"message":   "Redundancy check not yet implemented in daemon mode",
+	}, nil
+}
+
+func (s *Server) engramGetStats(params json.RawMessage) (interface{}, error) {
+	stats := map[string]interface{}{
+		"totalTokensSaved": 0,
+		"turnsProcessed":   0,
+	}
+	if s.sessions != nil {
+		stats["activeSessions"] = s.sessions.Count()
+	}
+	return stats, nil
+}
+
+func (s *Server) engramGenerateReport(params json.RawMessage) (interface{}, error) {
+	return map[string]interface{}{
+		"report":  "# Engram Report\n\nDaemon mode report generation not yet fully implemented.",
+		"summary": "No data available yet.",
+	}, nil
 }
