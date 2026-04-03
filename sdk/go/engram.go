@@ -61,9 +61,12 @@ func Connect(_ context.Context, socketPath string) (*Client, error) {
 		socketPath = filepath.Join(home, defaultSocket)
 	}
 
-	if _, err := os.Stat(socketPath); err != nil {
-		return nil, fmt.Errorf("engram: daemon socket not found: %s", socketPath)
+	// Verify the socket is connectable by dialing it.
+	conn, err := net.Dial("unix", socketPath)
+	if err != nil {
+		return nil, fmt.Errorf("engram: daemon not reachable: %w", err)
 	}
+	conn.Close()
 
 	return &Client{socketPath: socketPath}, nil
 }

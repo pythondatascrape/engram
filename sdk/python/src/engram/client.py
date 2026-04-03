@@ -38,8 +38,13 @@ class Engram:
     @classmethod
     async def connect(cls, socket_path: Optional[str] = None) -> "Engram":
         path = socket_path or _DEFAULT_SOCKET
-        if not os.path.exists(path):
-            raise EngramError(f"daemon socket not found: {path}")
+        # Verify connectivity by opening and immediately closing a connection.
+        try:
+            reader, writer = await asyncio.open_unix_connection(path)
+            writer.close()
+            await writer.wait_closed()
+        except (ConnectionRefusedError, FileNotFoundError, OSError) as e:
+            raise EngramError(f"daemon not reachable: {e}") from e
 
         client = cls(path)
         client._connected = True

@@ -4,8 +4,6 @@
 import { connect } from "node:net";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { access } from "node:fs/promises";
-
 const DEFAULT_SOCKET = join(homedir(), ".engram", "engram.sock");
 
 export class EngramError extends Error {
@@ -26,11 +24,12 @@ export class Engram {
 
   static async connect(socketPath) {
     const sock = socketPath || DEFAULT_SOCKET;
-    try {
-      await access(sock);
-    } catch {
-      throw new EngramError(`daemon socket not found: ${sock}`);
-    }
+    // Verify connectivity by opening and immediately closing a connection.
+    await new Promise((resolve, reject) => {
+      const conn = connect(sock);
+      conn.on("connect", () => { conn.destroy(); resolve(); });
+      conn.on("error", (err) => reject(new EngramError(`daemon not reachable: ${err.message}`)));
+    });
     return new Engram(sock);
   }
 
