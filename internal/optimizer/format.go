@@ -40,6 +40,22 @@ func FormatReportWithFiles(w io.Writer, projectName string, report *SavingsRepor
 		)
 	}
 
+	// Token savings visualization
+	totalOrig := 0
+	totalComp := 0
+	for _, item := range report.Items {
+		totalOrig += item.OriginalTokens
+		totalComp += item.CompressedTokens
+	}
+	totalSaved := totalOrig - totalComp
+	savePct := percent(totalSaved, totalOrig)
+
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "Token Savings:")
+	fmt.Fprintf(w, "  Original  %s %d tokens\n", bar(totalOrig, totalOrig, 30), totalOrig)
+	fmt.Fprintf(w, "  Compressed%s %d tokens\n", bar(totalComp, totalOrig, 30), totalComp)
+	fmt.Fprintf(w, "  Saved     %s %d tokens (%d%%)\n", bar(totalSaved, totalOrig, 30), totalSaved, savePct)
+
 	fmt.Fprintf(w, "\nEstimated monthly savings at %d sessions/day: $%.2f/mo\n\n",
 		report.Config.SessionsPerDay,
 		report.MonthlySavingsDollars,
@@ -51,4 +67,19 @@ func percent(saved, original int) int {
 		return 0
 	}
 	return (saved * 100) / original
+}
+
+// bar renders a horizontal bar proportional to value/max, width chars wide.
+func bar(value, max, width int) string {
+	if max == 0 {
+		return " " + strings.Repeat("\u2591", width)
+	}
+	filled := (value * width) / max
+	if filled < 0 {
+		filled = 0
+	}
+	if filled > width {
+		filled = width
+	}
+	return " " + strings.Repeat("\u2588", filled) + strings.Repeat("\u2591", width-filled)
 }
