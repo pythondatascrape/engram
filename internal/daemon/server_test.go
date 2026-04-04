@@ -106,6 +106,45 @@ func TestServer_CompressWithoutHandler(t *testing.T) {
 	assert.Equal(t, -32603, resp.Error.Code)
 }
 
+func TestCheckRedundancyEndToEnd(t *testing.T) {
+	sockPath := shortSock(t, "red.sock")
+	l, err := NewListener(sockPath)
+	require.NoError(t, err)
+
+	srv := NewServer(l, nil)
+	go srv.Serve()
+	defer srv.Stop()
+
+	time.Sleep(50 * time.Millisecond)
+
+	params1 := mustMarshal(map[string]interface{}{"content": "lang=go arch=monolith"})
+
+	// First call: not redundant
+	resp1 := dialAndSend(t, sockPath, RPCRequest{
+		JSONRPC: "2.0",
+		Method:  "engram.checkRedundancy",
+		Params:  params1,
+		ID:      float64(20),
+	})
+	require.Nil(t, resp1.Error)
+	var result1 map[string]interface{}
+	require.NoError(t, json.Unmarshal(resp1.Result, &result1))
+	assert.Equal(t, false, result1["isRedundant"])
+
+	// Second identical call: redundant (exact)
+	resp2 := dialAndSend(t, sockPath, RPCRequest{
+		JSONRPC: "2.0",
+		Method:  "engram.checkRedundancy",
+		Params:  params1,
+		ID:      float64(21),
+	})
+	require.Nil(t, resp2.Error)
+	var result2 map[string]interface{}
+	require.NoError(t, json.Unmarshal(resp2.Result, &result2))
+	assert.Equal(t, true, result2["isRedundant"])
+	assert.Equal(t, "exact", result2["kind"])
+}
+
 func TestCompressAlias(t *testing.T) {
 	sockPath := shortSock(t, "alias.sock")
 	l, err := NewListener(sockPath)

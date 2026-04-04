@@ -15,6 +15,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/pythondatascrape/engram/internal/redundancy"
 	"github.com/pythondatascrape/engram/internal/server"
 	"github.com/pythondatascrape/engram/internal/session"
 )
@@ -58,15 +59,16 @@ func (s *engramStats) snapshot() engramStatsSnapshot {
 // Server is a JSON-RPC server that accepts connections on a Listener and
 // dispatches method calls. The handler field may be nil for health-only mode.
 type Server struct {
-	listener    *Listener
-	handler     *server.Handler
-	sessions    *session.Manager
-	engramStats engramStats
-	statsDir    string // cached once at construction: ~/.engram
-	wg          sync.WaitGroup
-	ctx         context.Context
-	cancel      context.CancelFunc
-	started     time.Time
+	listener         *Listener
+	handler          *server.Handler
+	sessions         *session.Manager
+	engramStats      engramStats
+	redundancyChecker *redundancy.Checker
+	statsDir         string // cached once at construction: ~/.engram
+	wg               sync.WaitGroup
+	ctx              context.Context
+	cancel           context.CancelFunc
+	started          time.Time
 }
 
 // NewServer creates a JSON-RPC server. handler may be nil for health-only mode.
@@ -76,12 +78,13 @@ func NewServer(listener *Listener, handler *server.Handler) *Server {
 	statsDir := filepath.Join(home, ".engram")
 	_ = os.MkdirAll(statsDir, 0700)
 	return &Server{
-		listener: listener,
-		handler:  handler,
-		statsDir: statsDir,
-		ctx:      ctx,
-		cancel:   cancel,
-		started:  time.Now(),
+		listener:         listener,
+		handler:          handler,
+		statsDir:         statsDir,
+		redundancyChecker: redundancy.NewChecker(0.9),
+		ctx:              ctx,
+		cancel:           cancel,
+		started:          time.Now(),
 	}
 }
 
@@ -325,7 +328,25 @@ func (s *Server) engramCompressIdentity(params json.RawMessage) (interface{}, er
 }
 
 func (s *Server) engramCheckRedundancy(params json.RawMessage) (interface{}, error) {
-	return nil, fmt.Errorf("not implemented")
+	var p struct {
+		Content   string  `json:"content"`
+		Threshold float64 `json:"threshold"`
+	}
+	if err := json.Unmarshal(params, &p); err != nil {
+		return nil, fmt.Errorf("invalid params: %w", err)
+	}
+	if p.Content == "" {
+		return nil, fmt.Errorf("content is required")
+	}
+
+	checker := s.redundancyChecker
+	if p.Threshold > 0 {
+		checker = redundancy.NewChecker(p.Threshold)
+	}
+
+	result := checker.Check(p.Content)
+	checker.Record(p.Content)
+	return result, nil
 }
 
 func (s *Server) engramGetStats(params json.RawMessage) (interface{}, error) {
