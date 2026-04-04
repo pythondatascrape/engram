@@ -7,23 +7,55 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"os"
+	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/pythondatascrape/engram/internal/server"
 	"github.com/pythondatascrape/engram/internal/session"
 )
 
+// engramStats tracks cumulative compression accounting across all calls.
+type engramStats struct {
+	totalOriginal   atomic.Int64
+	totalCompressed atomic.Int64
+	totalSaved      atomic.Int64
+	totalCalls      atomic.Int64
+}
+
+func (s *engramStats) record(original, compressed int) {
+	saved := original - compressed
+	if saved < 0 {
+		saved = 0
+	}
+	s.totalOriginal.Add(int64(original))
+	s.totalCompressed.Add(int64(compressed))
+	s.totalSaved.Add(int64(saved))
+	s.totalCalls.Add(1)
+}
+
+func (s *engramStats) snapshot() map[string]int64 {
+	return map[string]int64{
+		"totalOriginalTokens":   s.totalOriginal.Load(),
+		"totalCompressedTokens": s.totalCompressed.Load(),
+		"totalSaved":            s.totalSaved.Load(),
+		"totalCalls":            s.totalCalls.Load(),
+	}
+}
+
 // Server is a JSON-RPC server that accepts connections on a Listener and
 // dispatches method calls. The handler field may be nil for health-only mode.
 type Server struct {
-	listener *Listener
-	handler  *server.Handler
-	sessions *session.Manager
-	wg       sync.WaitGroup
-	ctx      context.Context
-	cancel   context.CancelFunc
-	started  time.Time
+	listener     *Listener
+	handler      *server.Handler
+	sessions     *session.Manager
+	engramStats  engramStats
+	wg           sync.WaitGroup
+	ctx          context.Context
+	cancel       context.CancelFunc
+	started      time.Time
 }
 
 // NewServer creates a JSON-RPC server. handler may be nil for health-only mode.
@@ -240,9 +272,39 @@ func (s *Server) engramDeriveCodebook(params json.RawMessage) (interface{}, erro
 }
 
 func (s *Server) engramCompressIdentity(params json.RawMessage) (interface{}, error) {
+	var p struct {
+		Dimensions map[string]string `json:"dimensions"`
+	}
+	if err := json.Unmarshal(params, &p); err != nil {
+		return nil, fmt.Errorf("invalid params: %w", err)
+	}
+
+	// Serialize dimensions to compact key=value format.
+	original, _ := json.Marshal(p.Dimensions)
+	var parts []string
+	for k, v := range p.Dimensions {
+		parts = append(parts, k+"="+v)
+	}
+	compressed := ""
+	for i, part := range parts {
+		if i > 0 {
+			compressed += " "
+		}
+		compressed += part
+	}
+
+	origTokens := len(original) / 4
+	compTokens := len(compressed) / 4
+	s.engramStats.record(origTokens, compTokens)
+	s.flushStats()
+
 	return map[string]interface{}{
-		"status":  "stub",
-		"message": "Identity compression via daemon not yet wired to compression pipeline",
+		"serialized": compressed,
+		"stats": map[string]int{
+			"originalTokens":   origTokens,
+			"compressedTokens": compTokens,
+			"saved":            origTokens - compTokens,
+		},
 	}, nil
 }
 
@@ -263,14 +325,41 @@ func (s *Server) engramCheckRedundancy(params json.RawMessage) (interface{}, err
 }
 
 func (s *Server) engramGetStats(params json.RawMessage) (interface{}, error) {
-	stats := map[string]interface{}{
-		"totalTokensSaved": 0,
-		"turnsProcessed":   0,
+	snap := s.engramStats.snapshot()
+	result := map[string]interface{}{
+		"totalOriginalTokens":   snap["totalOriginalTokens"],
+		"totalCompressedTokens": snap["totalCompressedTokens"],
+		"totalSaved":            snap["totalSaved"],
+		"totalCalls":            snap["totalCalls"],
 	}
 	if s.sessions != nil {
-		stats["activeSessions"] = s.sessions.Count()
+		result["activeSessions"] = s.sessions.Count()
 	}
-	return stats, nil
+	s.flushStats()
+	return result, nil
+}
+
+// flushStats writes current engram compression stats to ~/.engram/stats.json
+// so external tools (e.g. statusline scripts) can read live data.
+func (s *Server) flushStats() {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return
+	}
+	dir := filepath.Join(home, ".engram")
+	_ = os.MkdirAll(dir, 0700)
+
+	snap := s.engramStats.snapshot()
+	data, err := json.Marshal(snap)
+	if err != nil {
+		return
+	}
+
+	tmp := filepath.Join(dir, ".stats.json.tmp")
+	if err := os.WriteFile(tmp, data, 0600); err != nil {
+		return
+	}
+	_ = os.Rename(tmp, filepath.Join(dir, "stats.json"))
 }
 
 func (s *Server) engramGenerateReport(params json.RawMessage) (interface{}, error) {

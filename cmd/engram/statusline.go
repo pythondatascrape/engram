@@ -1,11 +1,11 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 
-	"github.com/pythondatascrape/engram/internal/daemon"
 	"github.com/pythondatascrape/engram/internal/optimizer"
 	"github.com/spf13/cobra"
 )
@@ -43,18 +43,20 @@ token accounting from live sessions. Otherwise, static estimates are shown.`,
 			// Start with static estimates.
 			data := optimizer.StatuslineEstimate(report)
 
-			// Override with live daemon stats if available.
-			socketPath, _ := cmd.Flags().GetString("socket")
-			if socketPath == "" {
-				socketPath = defaultSocketPath()
-			}
-			if client, err := daemon.NewClient(socketPath); err == nil {
-				defer client.Close()
-				if stats, err := client.Stats(); err == nil && stats.CumulativeBaseline > 0 {
+			// Override with live stats from ~/.engram/stats.json if available.
+			home, _ := os.UserHomeDir()
+			statsPath := filepath.Join(home, ".engram", "stats.json")
+			if raw, err := os.ReadFile(statsPath); err == nil {
+				var s struct {
+					TotalOriginalTokens   int `json:"totalOriginalTokens"`
+					TotalCompressedTokens int `json:"totalCompressedTokens"`
+					TotalSaved            int `json:"totalSaved"`
+				}
+				if json.Unmarshal(raw, &s) == nil && s.TotalOriginalTokens > 0 {
 					data = optimizer.StatuslineData{
-						Orig:  stats.CumulativeBaseline,
-						Comp:  stats.TokensSent,
-						Saved: stats.TotalSaved,
+						Orig:  s.TotalOriginalTokens,
+						Comp:  s.TotalCompressedTokens,
+						Saved: s.TotalSaved,
 						Live:  true,
 					}
 				}
