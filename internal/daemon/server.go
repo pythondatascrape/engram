@@ -164,7 +164,7 @@ func (s *Server) dispatch(req RPCRequest) RPCResponse {
 		}
 	case "stats":
 		return s.handleStats(req)
-	case "compress":
+	case "compress", "engram.compress":
 		return s.handleCompress(req)
 	case "engram.deriveCodebook":
 		return s.handleEngram(req, s.engramDeriveCodebook)

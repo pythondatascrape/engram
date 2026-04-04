@@ -105,3 +105,41 @@ func TestServer_CompressWithoutHandler(t *testing.T) {
 	require.NotNil(t, resp.Error)
 	assert.Equal(t, -32603, resp.Error.Code)
 }
+
+func TestCompressAlias(t *testing.T) {
+	sockPath := shortSock(t, "alias.sock")
+	l, err := NewListener(sockPath)
+	require.NoError(t, err)
+
+	srv := NewServer(l, nil)
+	go srv.Serve()
+	defer srv.Stop()
+
+	time.Sleep(50 * time.Millisecond)
+
+	params := mustMarshal(map[string]interface{}{
+		"client_id": "test-client",
+		"api_key":   "test-key",
+		"query":     "hello",
+	})
+
+	// "compress" should return handler-not-configured error (not method-not-found)
+	resp1 := dialAndSend(t, sockPath, RPCRequest{
+		JSONRPC: "2.0",
+		Method:  "compress",
+		Params:  params,
+		ID:      float64(10),
+	})
+	require.NotNil(t, resp1.Error)
+	assert.Equal(t, -32603, resp1.Error.Code, "compress: expected handler-not-configured, not method-not-found")
+
+	// "engram.compress" must route to the same handler — same error code, not -32601
+	resp2 := dialAndSend(t, sockPath, RPCRequest{
+		JSONRPC: "2.0",
+		Method:  "engram.compress",
+		Params:  params,
+		ID:      float64(11),
+	})
+	require.NotNil(t, resp2.Error)
+	assert.Equal(t, -32603, resp2.Error.Code, "engram.compress: expected handler-not-configured, not method-not-found")
+}
