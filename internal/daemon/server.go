@@ -9,6 +9,8 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -16,6 +18,14 @@ import (
 	"github.com/pythondatascrape/engram/internal/server"
 	"github.com/pythondatascrape/engram/internal/session"
 )
+
+// engramStatsSnapshot is the serialisable form of engramStats.
+type engramStatsSnapshot struct {
+	TotalOriginalTokens   int64 `json:"totalOriginalTokens"`
+	TotalCompressedTokens int64 `json:"totalCompressedTokens"`
+	TotalSaved            int64 `json:"totalSaved"`
+	TotalCalls            int64 `json:"totalCalls"`
+}
 
 // engramStats tracks cumulative compression accounting across all calls.
 type engramStats struct {
@@ -36,34 +46,39 @@ func (s *engramStats) record(original, compressed int) {
 	s.totalCalls.Add(1)
 }
 
-func (s *engramStats) snapshot() map[string]int64 {
-	return map[string]int64{
-		"totalOriginalTokens":   s.totalOriginal.Load(),
-		"totalCompressedTokens": s.totalCompressed.Load(),
-		"totalSaved":            s.totalSaved.Load(),
-		"totalCalls":            s.totalCalls.Load(),
+func (s *engramStats) snapshot() engramStatsSnapshot {
+	return engramStatsSnapshot{
+		TotalOriginalTokens:   s.totalOriginal.Load(),
+		TotalCompressedTokens: s.totalCompressed.Load(),
+		TotalSaved:            s.totalSaved.Load(),
+		TotalCalls:            s.totalCalls.Load(),
 	}
 }
 
 // Server is a JSON-RPC server that accepts connections on a Listener and
 // dispatches method calls. The handler field may be nil for health-only mode.
 type Server struct {
-	listener     *Listener
-	handler      *server.Handler
-	sessions     *session.Manager
-	engramStats  engramStats
-	wg           sync.WaitGroup
-	ctx          context.Context
-	cancel       context.CancelFunc
-	started      time.Time
+	listener    *Listener
+	handler     *server.Handler
+	sessions    *session.Manager
+	engramStats engramStats
+	statsDir    string // cached once at construction: ~/.engram
+	wg          sync.WaitGroup
+	ctx         context.Context
+	cancel      context.CancelFunc
+	started     time.Time
 }
 
 // NewServer creates a JSON-RPC server. handler may be nil for health-only mode.
 func NewServer(listener *Listener, handler *server.Handler) *Server {
 	ctx, cancel := context.WithCancel(context.Background())
+	home, _ := os.UserHomeDir()
+	statsDir := filepath.Join(home, ".engram")
+	_ = os.MkdirAll(statsDir, 0700)
 	return &Server{
 		listener: listener,
 		handler:  handler,
+		statsDir: statsDir,
 		ctx:      ctx,
 		cancel:   cancel,
 		started:  time.Now(),
@@ -279,21 +294,22 @@ func (s *Server) engramCompressIdentity(params json.RawMessage) (interface{}, er
 		return nil, fmt.Errorf("invalid params: %w", err)
 	}
 
-	// Serialize dimensions to compact key=value format.
-	original, _ := json.Marshal(p.Dimensions)
-	var parts []string
+	// Serialize dimensions to deterministic sorted key=value format.
+	keys := make([]string, 0, len(p.Dimensions))
+	origBytes := 0
 	for k, v := range p.Dimensions {
-		parts = append(parts, k+"="+v)
+		keys = append(keys, k)
+		origBytes += len(k) + len(v) + 2 // rough: k=v + separator
 	}
-	compressed := ""
-	for i, part := range parts {
-		if i > 0 {
-			compressed += " "
-		}
-		compressed += part
+	sort.Strings(keys)
+	parts := make([]string, len(keys))
+	for i, k := range keys {
+		parts[i] = k + "=" + p.Dimensions[k]
 	}
+	compressed := strings.Join(parts, " ")
 
-	origTokens := len(original) / 4
+	// byte/4 is a standard rough token approximation.
+	origTokens := origBytes / 4
 	compTokens := len(compressed) / 4
 	s.engramStats.record(origTokens, compTokens)
 	s.flushStats()
@@ -309,57 +325,39 @@ func (s *Server) engramCompressIdentity(params json.RawMessage) (interface{}, er
 }
 
 func (s *Server) engramCheckRedundancy(params json.RawMessage) (interface{}, error) {
-	var p struct {
-		Content string `json:"content"`
-	}
-	if err := json.Unmarshal(params, &p); err != nil {
-		return nil, fmt.Errorf("invalid params: %w", err)
-	}
-	if p.Content == "" {
-		return nil, fmt.Errorf("content is required")
-	}
-	return map[string]interface{}{
-		"redundant": false,
-		"message":   "Redundancy check not yet implemented in daemon mode",
-	}, nil
+	return nil, fmt.Errorf("not implemented")
 }
 
 func (s *Server) engramGetStats(params json.RawMessage) (interface{}, error) {
 	snap := s.engramStats.snapshot()
-	result := map[string]interface{}{
-		"totalOriginalTokens":   snap["totalOriginalTokens"],
-		"totalCompressedTokens": snap["totalCompressedTokens"],
-		"totalSaved":            snap["totalSaved"],
-		"totalCalls":            snap["totalCalls"],
-	}
 	if s.sessions != nil {
-		result["activeSessions"] = s.sessions.Count()
+		return map[string]interface{}{
+			"totalOriginalTokens":   snap.TotalOriginalTokens,
+			"totalCompressedTokens": snap.TotalCompressedTokens,
+			"totalSaved":            snap.TotalSaved,
+			"totalCalls":            snap.TotalCalls,
+			"activeSessions":        s.sessions.Count(),
+		}, nil
 	}
-	s.flushStats()
-	return result, nil
+	return snap, nil
 }
 
-// flushStats writes current engram compression stats to ~/.engram/stats.json
-// so external tools (e.g. statusline scripts) can read live data.
+// flushStats atomically writes compression stats to ~/.engram/stats.json
+// so external tools (statusline, etc.) can read live data without a socket.
+// Only called after mutations — not on read paths.
 func (s *Server) flushStats() {
-	home, err := os.UserHomeDir()
+	if s.statsDir == "" {
+		return
+	}
+	data, err := json.Marshal(s.engramStats.snapshot())
 	if err != nil {
 		return
 	}
-	dir := filepath.Join(home, ".engram")
-	_ = os.MkdirAll(dir, 0700)
-
-	snap := s.engramStats.snapshot()
-	data, err := json.Marshal(snap)
-	if err != nil {
-		return
-	}
-
-	tmp := filepath.Join(dir, ".stats.json.tmp")
+	tmp := filepath.Join(s.statsDir, ".stats.json.tmp")
 	if err := os.WriteFile(tmp, data, 0600); err != nil {
 		return
 	}
-	_ = os.Rename(tmp, filepath.Join(dir, "stats.json"))
+	_ = os.Rename(tmp, filepath.Join(s.statsDir, "stats.json"))
 }
 
 func (s *Server) engramGenerateReport(params json.RawMessage) (interface{}, error) {

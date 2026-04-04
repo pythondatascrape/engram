@@ -43,7 +43,7 @@ func daemonize(configPath, socketPath string) error {
 	}
 
 	cmd := exec.Command(exe, "serve", "--foreground", "--config", configPath, "--socket", socketPath)
-	cmd.Env = append(os.Environ(), "ENGRAM_DAEMON_CHILD=1")
+	cmd.Env = append(os.Environ(), daemonChildEnv+"=1")
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
 	cmd.Stdin = nil
@@ -56,6 +56,9 @@ func daemonize(configPath, socketPath string) error {
 	fmt.Fprintf(os.Stderr, "engram daemon started (pid %d), logging to %s\n", cmd.Process.Pid, logFile.Name())
 	return nil
 }
+
+// daemonChildEnv is set on the child process to prevent re-daemonizing.
+const daemonChildEnv = "ENGRAM_DAEMON_CHILD"
 
 func defaultSocketPath() string {
 	home, err := os.UserHomeDir()
@@ -90,7 +93,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	socketPath, _ := cmd.Flags().GetString("socket")
 
 	// Daemonize unless --foreground or already a child process.
-	if !foreground && os.Getenv("ENGRAM_DAEMON_CHILD") == "" {
+	if !foreground && os.Getenv(daemonChildEnv) == "" {
 		return daemonize(configPath, socketPath)
 	}
 

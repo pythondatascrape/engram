@@ -17,8 +17,9 @@ import (
 )
 
 const (
-	releaseAPI = "https://api.github.com/repos/pythondatascrape/engram/releases/latest"
-	httpTimeout = 15 * time.Second
+	releaseAPI      = "https://api.github.com/repos/pythondatascrape/engram/releases/latest"
+	httpTimeout     = 15 * time.Second
+	checkCooldown   = time.Hour
 )
 
 type release struct {
@@ -35,6 +36,12 @@ type asset struct {
 // current, the binary is replaced in-place and the process exits so the
 // supervisor (launchd/systemd) can restart it. Safe to call in a goroutine.
 func CheckAndApply(current string) {
+	if !cooldownElapsed() {
+		slog.Debug("updater: skipping check, within cooldown window")
+		return
+	}
+	stampCheckTime()
+
 	rel, err := fetchLatest()
 	if err != nil {
 		slog.Debug("updater: fetch failed", "error", err)
@@ -97,6 +104,29 @@ func assetURL(rel *release) string {
 	return ""
 }
 
+// cooldownElapsed returns true if enough time has passed since the last check.
+func cooldownElapsed() bool {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return true
+	}
+	stamp := filepath.Join(home, ".engram", ".update-check")
+	info, err := os.Stat(stamp)
+	if err != nil {
+		return true
+	}
+	return time.Since(info.ModTime()) >= checkCooldown
+}
+
+func stampCheckTime() {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return
+	}
+	stamp := filepath.Join(home, ".engram", ".update-check")
+	_ = os.WriteFile(stamp, nil, 0600)
+}
+
 // applyUpdate downloads the asset to a temp file, then atomically replaces
 // the running binary.
 func applyUpdate(url string) error {
@@ -123,7 +153,13 @@ func applyUpdate(url string) error {
 	if err != nil {
 		return fmt.Errorf("create temp file: %w", err)
 	}
-	defer os.Remove(tmp.Name())
+	tmpName := tmp.Name()
+	renamed := false
+	defer func() {
+		if !renamed {
+			os.Remove(tmpName)
+		}
+	}()
 
 	if _, err := io.Copy(tmp, resp.Body); err != nil {
 		tmp.Close()
@@ -131,9 +167,13 @@ func applyUpdate(url string) error {
 	}
 	tmp.Close()
 
-	if err := os.Chmod(tmp.Name(), 0755); err != nil {
+	if err := os.Chmod(tmpName, 0755); err != nil {
 		return fmt.Errorf("chmod: %w", err)
 	}
 
-	return os.Rename(tmp.Name(), exe)
+	if err := os.Rename(tmpName, exe); err != nil {
+		return err
+	}
+	renamed = true
+	return nil
 }

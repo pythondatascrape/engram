@@ -1,0 +1,28 @@
+syntax = "proto3";
+package engram.v1;
+option go_package = "github.com/pythondatascrape/engram/gen/go/engram/v1";
+
+
+// Session creation options (sent with first request)
+message SessionOpts {
+    string provider = 1;      // "anthropic", "openai", "my-custom-provider"
+    string model = 2;         // "claude-opus-4-6", "gpt-4o", etc.
+    string codebook = 3;      // optional - server uses default if empty
+    string serializer = 4;    // optional - server uses default if empty
+}
+
+// Session state (returned on state query)
+message SessionState {
+    string session_id = 1;
+    string status = 2;              // ACTIVE | COMPLETED | EVICTED
+    int32 turns = 3;
+    int32 tokens_sent = 4;
+    int32 tokens_saved = 5;
+    int32 identity_tokens = 6;
+    int32 ttl_remaining_seconds = 7;
+    int32 idle_seconds = 8;
+    string provider = 9;
+    string provider_status = 10;
+    int32 provider_latency_ms = 11;
+    int32 knowledge_refs_resolved = 12;
+}

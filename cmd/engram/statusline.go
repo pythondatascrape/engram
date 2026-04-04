@@ -66,6 +66,5 @@ token accounting from live sessions. Otherwise, static estimates are shown.`,
 			return nil
 		},
 	}
-	cmd.Flags().String("socket", "", "Unix socket path (default: ~/.engram/engram.sock)")
 	return cmd
 }
