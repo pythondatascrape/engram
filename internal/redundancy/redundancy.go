@@ -45,6 +45,12 @@ func (c *Checker) Record(content string) {
 // Check tests content against all previously recorded strings.
 // It does NOT record the content — call Record separately if desired.
 func (c *Checker) Check(content string) Result {
+	return c.CheckWithThreshold(content, c.threshold)
+}
+
+// CheckWithThreshold is like Check but uses the provided similarity threshold
+// instead of the one set at construction. The shared recorded history is used.
+func (c *Checker) CheckWithThreshold(content string, threshold float64) Result {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -59,7 +65,7 @@ func (c *Checker) Check(content string) Result {
 			return Result{IsRedundant: true, Kind: "normalized", Similarity: 1.0}
 		}
 		sim := jaccard(normTokens, strings.Fields(c.normalized[i]))
-		if sim >= c.threshold {
+		if sim >= threshold {
 			return Result{IsRedundant: true, Kind: "similar", Similarity: sim}
 		}
 	}

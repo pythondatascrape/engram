@@ -27,14 +27,16 @@ type engramStatsSnapshot struct {
 	TotalCompressedTokens int64 `json:"totalCompressedTokens"`
 	TotalSaved            int64 `json:"totalSaved"`
 	TotalCalls            int64 `json:"totalCalls"`
+	TotalRedundancyHits   int64 `json:"totalRedundancyHits"`
 }
 
 // engramStats tracks cumulative compression accounting across all calls.
 type engramStats struct {
-	totalOriginal   atomic.Int64
-	totalCompressed atomic.Int64
-	totalSaved      atomic.Int64
-	totalCalls      atomic.Int64
+	totalOriginal    atomic.Int64
+	totalCompressed  atomic.Int64
+	totalSaved       atomic.Int64
+	totalCalls       atomic.Int64
+	totalRedundancy  atomic.Int64
 }
 
 func (s *engramStats) record(original, compressed int) {
@@ -54,6 +56,7 @@ func (s *engramStats) snapshot() engramStatsSnapshot {
 		TotalCompressedTokens: s.totalCompressed.Load(),
 		TotalSaved:            s.totalSaved.Load(),
 		TotalCalls:            s.totalCalls.Load(),
+		TotalRedundancyHits:   s.totalRedundancy.Load(),
 	}
 }
 
@@ -341,13 +344,16 @@ func (s *Server) engramCheckRedundancy(params json.RawMessage) (interface{}, err
 		return nil, fmt.Errorf("content is required")
 	}
 
-	checker := s.redundancyChecker
+	var result redundancy.Result
 	if p.Threshold > 0 {
-		checker = redundancy.NewChecker(p.Threshold)
+		result = s.redundancyChecker.CheckWithThreshold(p.Content, p.Threshold)
+	} else {
+		result = s.redundancyChecker.Check(p.Content)
 	}
-
-	result := checker.Check(p.Content)
-	checker.Record(p.Content)
+	s.redundancyChecker.Record(p.Content)
+	if result.IsRedundant {
+		s.engramStats.totalRedundancy.Add(1)
+	}
 	return result, nil
 }
 
@@ -409,7 +415,7 @@ func (s *Server) engramGenerateReport(params json.RawMessage) (interface{}, erro
 		"tokensBefore":        snap.TotalOriginalTokens,
 		"tokensAfter":         snap.TotalCompressedTokens,
 		"estimatedSavingsPct": savingsPct,
-		"redundancyHits":      0,
+		"redundancyHits":      snap.TotalRedundancyHits,
 		"markdown":            md,
 	}, nil
 }
