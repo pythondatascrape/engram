@@ -12,6 +12,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 )
 
@@ -53,7 +54,22 @@ func (a *Adapter) Connect(ctx context.Context) error {
 	return nil
 }
 
+// parseDimensions splits a space-separated string of key=value pairs into a
+// map[string]string. Entries without an '=' are ignored.
+func parseDimensions(s string) map[string]string {
+	dims := make(map[string]string)
+	for _, part := range strings.Fields(s) {
+		k, v, ok := strings.Cut(part, "=")
+		if !ok {
+			continue
+		}
+		dims[k] = v
+	}
+	return dims
+}
+
 // CompressContext sends content to the daemon for compression.
+// content must be a space-separated list of key=value pairs.
 func (a *Adapter) CompressContext(ctx context.Context, content string) (string, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -69,7 +85,7 @@ func (a *Adapter) CompressContext(ctx context.Context, content string) (string, 
 		"jsonrpc": "2.0",
 		"id":      id,
 		"method":  "engram.compressIdentity",
-		"params":  map[string]interface{}{"content": content},
+		"params":  map[string]interface{}{"dimensions": parseDimensions(content)},
 	}
 
 	data, err := json.Marshal(req)
@@ -90,7 +106,7 @@ func (a *Adapter) CompressContext(ctx context.Context, content string) (string, 
 
 	var resp struct {
 		Result struct {
-			Compressed string `json:"compressed"`
+			Serialized string `json:"serialized"`
 		} `json:"result"`
 		Error *struct {
 			Message string `json:"message"`
@@ -105,7 +121,11 @@ func (a *Adapter) CompressContext(ctx context.Context, content string) (string, 
 		return "", fmt.Errorf("daemon error: %s", resp.Error.Message)
 	}
 
-	return resp.Result.Compressed, nil
+	if resp.Result.Serialized == "" {
+		return "", fmt.Errorf("daemon response missing 'serialized' field")
+	}
+
+	return resp.Result.Serialized, nil
 }
 
 // Close disconnects from the daemon.
