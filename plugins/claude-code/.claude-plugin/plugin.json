@@ -1,0 +1,23 @@
+{
+  "name": "engram",
+  "version": "0.1.0",
+  "description": "Identity-aware context compression for Claude Code — reduces redundant identity tokens in conversation context",
+  "author": {
+    "name": "Eric Meyer"
+  },
+  "license": "MIT",
+  "keywords": [
+    "mcp",
+    "compression",
+    "identity",
+    "context-window",
+    "token-savings"
+  ],
+  "skills": "./skills/",
+  "mcpServers": {
+    "engram": {
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/server/index.mjs"]
+    }
+  }
+}
