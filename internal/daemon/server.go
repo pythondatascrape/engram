@@ -384,8 +384,32 @@ func (s *Server) flushStats() {
 }
 
 func (s *Server) engramGenerateReport(params json.RawMessage) (interface{}, error) {
+	snap := s.engramStats.snapshot()
+
+	var savingsPct float64
+	if snap.TotalOriginalTokens > 0 {
+		savingsPct = float64(snap.TotalOriginalTokens-snap.TotalCompressedTokens) / float64(snap.TotalOriginalTokens) * 100
+	}
+
+	md := fmt.Sprintf("# Engram Session Report\n\n"+
+		"- Compression events: %d\n"+
+		"- Tokens before: %d\n"+
+		"- Tokens after: %d\n"+
+		"- Tokens saved: %d\n"+
+		"- Estimated savings: %.1f%%\n",
+		snap.TotalCalls,
+		snap.TotalOriginalTokens,
+		snap.TotalCompressedTokens,
+		snap.TotalSaved,
+		savingsPct,
+	)
+
 	return map[string]interface{}{
-		"report":  "# Engram Report\n\nDaemon mode report generation not yet fully implemented.",
-		"summary": "No data available yet.",
+		"compressionEvents":   snap.TotalCalls,
+		"tokensBefore":        snap.TotalOriginalTokens,
+		"tokensAfter":         snap.TotalCompressedTokens,
+		"estimatedSavingsPct": savingsPct,
+		"redundancyHits":      0,
+		"markdown":            md,
 	}, nil
 }

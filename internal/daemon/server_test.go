@@ -183,6 +183,76 @@ func TestCompressAlias(t *testing.T) {
 	assert.Equal(t, -32603, resp2.Error.Code, "engram.compress: expected handler-not-configured, not method-not-found")
 }
 
+func TestGenerateReportHasRealData(t *testing.T) {
+	sockPath := shortSock(t, "rep.sock")
+	l, err := NewListener(sockPath)
+	require.NoError(t, err)
+
+	srv := NewServer(l, nil)
+	go srv.Serve()
+	defer srv.Stop()
+
+	time.Sleep(50 * time.Millisecond)
+
+	// Make 2 compressIdentity calls to build up stats.
+	dims := mustMarshal(map[string]interface{}{
+		"dimensions": map[string]string{
+			"lang": "go",
+			"arch": "modular_monolith",
+			"db":   "postgresql",
+		},
+	})
+	for i := 0; i < 2; i++ {
+		resp := dialAndSend(t, sockPath, RPCRequest{
+			JSONRPC: "2.0",
+			Method:  "engram.compressIdentity",
+			Params:  dims,
+			ID:      float64(100 + i),
+		})
+		require.Nil(t, resp.Error, "compressIdentity call %d failed", i)
+	}
+
+	// Call generateReport.
+	resp := dialAndSend(t, sockPath, RPCRequest{
+		JSONRPC: "2.0",
+		Method:  "engram.generateReport",
+		Params:  mustMarshal(map[string]interface{}{}),
+		ID:      float64(200),
+	})
+	require.Nil(t, resp.Error)
+
+	var result map[string]interface{}
+	require.NoError(t, json.Unmarshal(resp.Result, &result))
+
+	// Must not be a placeholder.
+	if msg, ok := result["message"].(string); ok {
+		assert.NotContains(t, msg, "not fully implemented")
+	}
+	if report, ok := result["report"].(string); ok {
+		assert.NotContains(t, report, "not yet fully implemented")
+	}
+
+	// compressionEvents must be >= 2.
+	ce, ok := result["compressionEvents"].(float64)
+	require.True(t, ok, "compressionEvents must be numeric, got %T", result["compressionEvents"])
+	assert.GreaterOrEqual(t, ce, float64(2))
+
+	// tokensBefore must be > 0.
+	tb, ok := result["tokensBefore"].(float64)
+	require.True(t, ok, "tokensBefore must be numeric")
+	assert.Greater(t, tb, float64(0))
+
+	// estimatedSavingsPct must be > 0.
+	pct, ok := result["estimatedSavingsPct"].(float64)
+	require.True(t, ok, "estimatedSavingsPct must be numeric")
+	assert.Greater(t, pct, float64(0))
+
+	// markdown must mention the compression event count.
+	md, ok := result["markdown"].(string)
+	require.True(t, ok, "markdown must be a string")
+	assert.Contains(t, md, "2")
+}
+
 func TestDeriveCodebookRealImplementation(t *testing.T) {
 	sockPath := shortSock(t, "dcb.sock")
 	l, err := NewListener(sockPath)
