@@ -44,15 +44,15 @@ the engram compression plugin. Use flags to target a specific client.`,
 			default:
 				targets = install.DetectAll()
 				if len(targets) == 0 {
-					fmt.Println("No supported clients detected.")
-					fmt.Println()
-					fmt.Println("Supported clients:")
-					fmt.Println("  - Claude Code  (detected via ~/.claude/)")
-					fmt.Println("  - OpenClaw     (detected via ~/.openclaw/ or openclaw in PATH)")
-					fmt.Println()
-					fmt.Println("Install manually with:")
-					fmt.Println("  engram install --claude-code")
-					fmt.Println("  engram install --openclaw")
+					fmt.Fprintln(cmd.OutOrStdout(), "No supported clients detected.")
+					fmt.Fprintln(cmd.OutOrStdout())
+					fmt.Fprintln(cmd.OutOrStdout(), "Supported clients:")
+					fmt.Fprintln(cmd.OutOrStdout(), "  - Claude Code  (detected via ~/.claude/)")
+					fmt.Fprintln(cmd.OutOrStdout(), "  - OpenClaw     (detected via ~/.openclaw/ or openclaw in PATH)")
+					fmt.Fprintln(cmd.OutOrStdout())
+					fmt.Fprintln(cmd.OutOrStdout(), "Install manually with:")
+					fmt.Fprintln(cmd.OutOrStdout(), "  engram install --claude-code")
+					fmt.Fprintln(cmd.OutOrStdout(), "  engram install --openclaw")
 					return nil
 				}
 			}
@@ -67,7 +67,7 @@ the engram compression plugin. Use flags to target a specific client.`,
 			}
 
 			for _, target := range targets {
-				fmt.Printf("Installing engram plugin for %s...\n", target.Name)
+				fmt.Fprintf(cmd.OutOrStdout(), "Installing engram plugin for %s...\n", target.Name)
 
 				pluginDir, err := install.PluginSourceDir(target.Name)
 				if err != nil {
@@ -82,7 +82,7 @@ the engram compression plugin. Use flags to target a specific client.`,
 					if err := install.RegisterClaudeCode(src, pluginVersion); err != nil {
 						return fmt.Errorf("install Claude Code plugin: %w", err)
 					}
-					fmt.Printf("  Claude Code plugin installed to ~/.claude/plugins/cache/engram/engram/%s/\n", pluginVersion)
+					fmt.Fprintf(cmd.OutOrStdout(), "  Claude Code plugin installed to ~/.claude/plugins/cache/engram/engram/%s/\n", pluginVersion)
 
 				case "openclaw":
 					if err := install.RegisterOpenClaw(src, pluginVersion); err != nil {
@@ -92,7 +92,7 @@ the engram compression plugin. Use flags to target a specific client.`,
 				}
 			}
 
-			fmt.Println("\nDone. Restart your client to activate the engram plugin.")
+			fmt.Fprintln(cmd.OutOrStdout(), "\nDone. Restart your client to activate the engram plugin.")
 			return nil
 		},
 	}
