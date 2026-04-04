@@ -52,3 +52,4 @@ autoresearch-loc-results.tsv
 CLAUDE.md
 **/CLAUDE.md
 EFFICIENCY_REVIEW.md
+plugins/claude-code/node_modules/
