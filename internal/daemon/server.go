@@ -15,6 +15,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/pythondatascrape/engram/internal/identity/codebook"
 	"github.com/pythondatascrape/engram/internal/redundancy"
 	"github.com/pythondatascrape/engram/internal/server"
 	"github.com/pythondatascrape/engram/internal/session"
@@ -282,10 +283,11 @@ func (s *Server) engramDeriveCodebook(params json.RawMessage) (interface{}, erro
 	if p.Content == "" {
 		return nil, fmt.Errorf("content is required")
 	}
-	// Stub — full implementation will integrate with codebook.Parse
+	dims, serialized := codebook.Derive(p.Content)
 	return map[string]interface{}{
-		"status":  "derived",
-		"message": "Codebook derivation via daemon not yet wired to compression pipeline",
+		"status":     "derived",
+		"codebook":   dims,
+		"serialized": serialized,
 	}, nil
 }
 

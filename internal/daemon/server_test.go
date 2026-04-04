@@ -182,3 +182,41 @@ func TestCompressAlias(t *testing.T) {
 	require.NotNil(t, resp2.Error)
 	assert.Equal(t, -32603, resp2.Error.Code, "engram.compress: expected handler-not-configured, not method-not-found")
 }
+
+func TestDeriveCodebookRealImplementation(t *testing.T) {
+	sockPath := shortSock(t, "dcb.sock")
+	l, err := NewListener(sockPath)
+	require.NoError(t, err)
+
+	srv := NewServer(l, nil)
+	go srv.Serve()
+	defer srv.Stop()
+
+	time.Sleep(50 * time.Millisecond)
+
+	params := mustMarshal(map[string]interface{}{
+		"content": "lang=go arch=modular_monolith db=postgresql",
+	})
+
+	resp := dialAndSend(t, sockPath, RPCRequest{
+		JSONRPC: "2.0",
+		Method:  "engram.deriveCodebook",
+		Params:  params,
+		ID:      float64(30),
+	})
+
+	require.Nil(t, resp.Error)
+	var result map[string]interface{}
+	require.NoError(t, json.Unmarshal(resp.Result, &result))
+
+	assert.Equal(t, "derived", result["status"])
+	assert.NotContains(t, result, "message", "stub message should not be present")
+
+	serialized, ok := result["serialized"].(string)
+	require.True(t, ok, "serialized should be a string")
+	assert.Contains(t, serialized, "lang=go")
+
+	codebook, ok := result["codebook"].(map[string]interface{})
+	require.True(t, ok, "codebook should be a map")
+	assert.Equal(t, "go", codebook["lang"])
+}
