@@ -14,6 +14,7 @@ func main() {
 	rootCmd.AddCommand(newAdvisorCmd())
 	rootCmd.AddCommand(newInstallCmd())
 	rootCmd.AddCommand(newStatuslineCmd())
+	rootCmd.AddCommand(newMCPCmd())
 	if err := rootCmd.Execute(); err != nil {
 		slog.Error("command failed", "error", err)
 		os.Exit(1)
