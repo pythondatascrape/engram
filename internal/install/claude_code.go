@@ -43,10 +43,11 @@ func RegisterOpenClaw(sourceDir, version string) error {
 		return fmt.Errorf("cannot determine home directory: %w", err)
 	}
 
+	// OpenClaw stores plugins directly in plugins/ without the cache/ subdirectory
 	targetDir := filepath.Join(home, ".openclaw", "plugins", "engram", "engram", version)
 
 	if _, err := os.Stat(targetDir); err == nil {
-		slog.Info("removing previous openclaw installation", "path", targetDir)
+		slog.Info("removing previous installation", "path", targetDir)
 		if err := os.RemoveAll(targetDir); err != nil {
 			return fmt.Errorf("remove old openclaw installation: %w", err)
 		}
@@ -54,7 +55,7 @@ func RegisterOpenClaw(sourceDir, version string) error {
 
 	slog.Info("installing OpenClaw plugin", "source", sourceDir, "target", targetDir)
 	if err := copyDir(sourceDir, targetDir); err != nil {
-		return fmt.Errorf("copy openclaw plugin files: %w", err)
+		return fmt.Errorf("copy plugin files: %w", err)
 	}
 
 	slog.Info("OpenClaw plugin installed", "path", targetDir)
