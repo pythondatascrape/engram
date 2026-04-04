@@ -35,6 +35,32 @@ func RegisterClaudeCode(sourceDir, version string) error {
 	return nil
 }
 
+// RegisterOpenClaw installs the engram plugin into OpenClaw.
+// It copies plugin files from sourceDir to ~/.openclaw/plugins/engram/engram/<version>/.
+func RegisterOpenClaw(sourceDir, version string) error {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("cannot determine home directory: %w", err)
+	}
+
+	targetDir := filepath.Join(home, ".openclaw", "plugins", "engram", "engram", version)
+
+	if _, err := os.Stat(targetDir); err == nil {
+		slog.Info("removing previous openclaw installation", "path", targetDir)
+		if err := os.RemoveAll(targetDir); err != nil {
+			return fmt.Errorf("remove old openclaw installation: %w", err)
+		}
+	}
+
+	slog.Info("installing OpenClaw plugin", "source", sourceDir, "target", targetDir)
+	if err := copyDir(sourceDir, targetDir); err != nil {
+		return fmt.Errorf("copy openclaw plugin files: %w", err)
+	}
+
+	slog.Info("OpenClaw plugin installed", "path", targetDir)
+	return nil
+}
+
 func copyDir(src, dst string) error {
 	return filepath.WalkDir(src, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {

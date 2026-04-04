@@ -45,3 +45,40 @@ func TestCopyDir_SkipsNodeModules(t *testing.T) {
 	assert.Equal(t, "// main", string(data))
 }
 
+func TestRegisterOpenClaw_CopiesFilesToOpenClawPluginsDir(t *testing.T) {
+	src := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(src, "adapter.go"), []byte("package openclaw"), 0o644))
+
+	target := t.TempDir()
+	t.Setenv("HOME", target)
+
+	err := RegisterOpenClaw(src, "0.2.0")
+	require.NoError(t, err)
+
+	installed := filepath.Join(target, ".openclaw", "plugins", "engram", "engram", "0.2.0", "adapter.go")
+	data, err := os.ReadFile(installed)
+	require.NoError(t, err)
+	require.Equal(t, "package openclaw", string(data))
+}
+
+func TestRegisterOpenClaw_RemovesPreviousInstallation(t *testing.T) {
+	src := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(src, "new.go"), []byte("new"), 0o644))
+
+	target := t.TempDir()
+	t.Setenv("HOME", target)
+
+	targetDir := filepath.Join(target, ".openclaw", "plugins", "engram", "engram", "0.2.0")
+	require.NoError(t, os.MkdirAll(targetDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(targetDir, "old.go"), []byte("old"), 0o644))
+
+	require.NoError(t, RegisterOpenClaw(src, "0.2.0"))
+
+	_, err := os.Stat(filepath.Join(targetDir, "old.go"))
+	require.True(t, os.IsNotExist(err), "old file should be removed")
+
+	data, err := os.ReadFile(filepath.Join(targetDir, "new.go"))
+	require.NoError(t, err)
+	require.Equal(t, "new", string(data))
+}
+
