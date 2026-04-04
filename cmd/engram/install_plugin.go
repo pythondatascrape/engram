@@ -85,7 +85,10 @@ the engram compression plugin. Use flags to target a specific client.`,
 					fmt.Printf("  Claude Code plugin installed to ~/.claude/plugins/cache/engram/engram/%s/\n", pluginVersion)
 
 				case "openclaw":
-					fmt.Println("  OpenClaw plugin installation not yet implemented.")
+					if err := install.RegisterOpenClaw(src, pluginVersion); err != nil {
+						return fmt.Errorf("install OpenClaw plugin: %w", err)
+					}
+					fmt.Fprintf(cmd.OutOrStdout(), "  OpenClaw plugin installed to ~/.openclaw/plugins/engram/engram/%s/\n", pluginVersion)
 				}
 			}
 
