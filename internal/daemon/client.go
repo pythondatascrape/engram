@@ -48,6 +48,27 @@ func (c *Client) Health() (*HealthResult, error) {
 	return &health, nil
 }
 
+// Stats sends a stats RPC and returns cumulative token accounting.
+func (c *Client) Stats() (*StatsResult, error) {
+	c.id++
+	req := RPCRequest{JSONRPC: "2.0", Method: "stats", ID: c.id}
+	if err := c.enc.Encode(req); err != nil {
+		return nil, fmt.Errorf("daemon: send stats request: %w", err)
+	}
+	var resp RPCResponse
+	if err := c.dec.Decode(&resp); err != nil {
+		return nil, fmt.Errorf("daemon: read stats response: %w", err)
+	}
+	if resp.Error != nil {
+		return nil, fmt.Errorf("daemon: stats error %d: %s", resp.Error.Code, resp.Error.Message)
+	}
+	var result StatsResult
+	if err := json.Unmarshal(resp.Result, &result); err != nil {
+		return nil, fmt.Errorf("daemon: unmarshal stats: %w", err)
+	}
+	return &result, nil
+}
+
 // Compress sends a compress RPC and returns the result.
 func (c *Client) Compress(req *CompressRequest) (*CompressResult, error) {
 	c.id++

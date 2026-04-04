@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"syscall"
@@ -21,6 +22,40 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// daemonize re-executes the current binary as a background child process,
+// detached from the terminal, then returns so the parent can exit.
+func daemonize(configPath, socketPath string) error {
+	exe, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("resolve executable: %w", err)
+	}
+
+	home, _ := os.UserHomeDir()
+	logDir := filepath.Join(home, ".engram", "logs")
+	if err := os.MkdirAll(logDir, 0700); err != nil {
+		return fmt.Errorf("create log dir: %w", err)
+	}
+
+	logFile, err := os.OpenFile(filepath.Join(logDir, "engram.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
+	if err != nil {
+		return fmt.Errorf("open log file: %w", err)
+	}
+
+	cmd := exec.Command(exe, "serve", "--foreground", "--config", configPath, "--socket", socketPath)
+	cmd.Env = append(os.Environ(), "ENGRAM_DAEMON_CHILD=1")
+	cmd.Stdout = logFile
+	cmd.Stderr = logFile
+	cmd.Stdin = nil
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("start daemon: %w", err)
+	}
+
+	fmt.Fprintf(os.Stderr, "engram daemon started (pid %d), logging to %s\n", cmd.Process.Pid, logFile.Name())
+	return nil
+}
+
 func defaultSocketPath() string {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -33,12 +68,13 @@ func newServeCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "serve",
 		Short: "Start the Engram daemon",
-		Long:  "Start the Engram daemon process, listening on a Unix socket\nfor JSON-RPC requests from CLI clients.",
+		Long:  "Start the Engram daemon process, listening on a Unix socket\nfor JSON-RPC requests from CLI clients.\n\nBy default, engram daemonizes itself and returns immediately.\nUse --foreground to keep it attached to the terminal.",
 		RunE:  runServe,
 	}
 	cmd.Flags().String("config", "engram.yaml", "Path to configuration file")
 	cmd.Flags().String("socket", defaultSocketPath(), "Unix socket path for daemon")
 	cmd.Flags().Bool("install-daemon", false, "Install as a system daemon (launchd/systemd)")
+	cmd.Flags().Bool("foreground", false, "Run in foreground instead of daemonizing")
 	return cmd
 }
 
@@ -48,8 +84,14 @@ func runServe(cmd *cobra.Command, args []string) error {
 		return installService(cmd)
 	}
 
+	foreground, _ := cmd.Flags().GetBool("foreground")
 	configPath, _ := cmd.Flags().GetString("config")
 	socketPath, _ := cmd.Flags().GetString("socket")
+
+	// Daemonize unless --foreground or already a child process.
+	if !foreground && os.Getenv("ENGRAM_DAEMON_CHILD") == "" {
+		return daemonize(configPath, socketPath)
+	}
 
 	// Load configuration.
 	cfg, err := config.Load(configPath)

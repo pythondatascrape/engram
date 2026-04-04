@@ -62,6 +62,39 @@ func FormatReportWithFiles(w io.Writer, projectName string, report *SavingsRepor
 	)
 }
 
+// StatuslineData holds the values used to render the statusline chart.
+// When the daemon is running, Orig/Comp/Saved reflect actual runtime token
+// accounting. When the daemon is unavailable, they are static estimates.
+type StatuslineData struct {
+	Orig  int // tokens that would have been sent without Engram
+	Comp  int // tokens actually sent
+	Saved int // tokens saved
+	Live  bool
+}
+
+// StatuslineEstimate builds StatuslineData from static analysis alone.
+func StatuslineEstimate(report *SavingsReport) StatuslineData {
+	orig, comp := 0, 0
+	for _, item := range report.Items {
+		orig += item.OriginalTokens
+		comp += item.CompressedTokens
+	}
+	return StatuslineData{Orig: orig, Comp: comp, Saved: orig - comp}
+}
+
+// FormatStatusline writes a compact three-row bar chart for use in editor
+// status lines (e.g. Claude Code statusLine).
+func FormatStatusline(w io.Writer, d StatuslineData) {
+	orig := d.Orig
+	if orig == 0 {
+		orig = 1 // avoid divide-by-zero in bar()
+	}
+	savePct := percent(d.Saved, orig)
+	fmt.Fprintf(w, "orig  %s %d\n", bar(d.Orig, orig, 20), d.Orig)
+	fmt.Fprintf(w, "comp  %s %d\n", bar(d.Comp, orig, 20), d.Comp)
+	fmt.Fprintf(w, "saved %s %d (%d%%)\n", bar(d.Saved, orig, 20), d.Saved, savePct)
+}
+
 func percent(saved, original int) int {
 	if original == 0 {
 		return 0

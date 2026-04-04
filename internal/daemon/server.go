@@ -115,6 +115,8 @@ func (s *Server) dispatch(req RPCRequest) RPCResponse {
 			Result:  mustMarshal(health),
 			ID:      req.ID,
 		}
+	case "stats":
+		return s.handleStats(req)
 	case "compress":
 		return s.handleCompress(req)
 	case "engram.deriveCodebook":
@@ -134,6 +136,21 @@ func (s *Server) dispatch(req RPCRequest) RPCResponse {
 			ID:      req.ID,
 		}
 	}
+}
+
+func (s *Server) handleStats(req RPCRequest) RPCResponse {
+	result := StatsResult{}
+	if s.sessions != nil {
+		agg := s.sessions.Stats()
+		result.ActiveSessions = agg.ActiveSessions
+		result.TotalTurns = agg.TotalTurns
+		result.CumulativeBaseline = agg.CumulativeBaseline
+		result.TokensSent = agg.TokensSent
+		result.TokensSaved = agg.TokensSaved
+		result.ContextTokensSaved = agg.ContextTokensSaved
+		result.TotalSaved = agg.TokensSaved + agg.ContextTokensSaved
+	}
+	return RPCResponse{JSONRPC: "2.0", Result: mustMarshal(result), ID: req.ID}
 }
 
 func (s *Server) handleCompress(req RPCRequest) RPCResponse {

@@ -160,3 +160,30 @@ func (m *Manager) Count() int {
 	defer m.mu.RUnlock()
 	return len(m.sessions)
 }
+
+// AggregateStats holds cumulative token accounting across all active sessions.
+type AggregateStats struct {
+	ActiveSessions     int
+	TotalTurns         int
+	CumulativeBaseline int
+	TokensSent         int
+	TokensSaved        int
+	ContextTokensSaved int
+}
+
+// Stats returns cumulative token accounting summed across all active sessions.
+func (m *Manager) Stats() AggregateStats {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	var s AggregateStats
+	s.ActiveSessions = len(m.sessions)
+	for _, sess := range m.sessions {
+		snap := sess.Snapshot()
+		s.TotalTurns += snap.Turns
+		s.CumulativeBaseline += snap.CumulativeBaseline
+		s.TokensSent += snap.TokensSent
+		s.TokensSaved += snap.TokensSaved
+		s.ContextTokensSaved += snap.ContextTokensSaved
+	}
+	return s
+}
