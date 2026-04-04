@@ -33,8 +33,8 @@ test-node:
 test-go-sdk:
 	cd sdk/go && go test ./...
 
-install:
-	go install $(LDFLAGS) ./cmd/engram
+install: build
+	@./bin/engram serve --install-daemon --config $(abspath $(CONFIG))
 
 clean:
 	rm -rf bin/ dist/
