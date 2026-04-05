@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { createInterface } from 'readline';
+import { fileURLToPath } from 'url';
 import { DaemonClient } from '../lib/daemon-client.mjs';
 
 const MIN_CHARS_TO_CHECK = 800; // ~200 tokens at ~4 chars/token
@@ -44,6 +45,6 @@ export async function run(clientFactory = () => new DaemonClient(), stdinFn = re
 }
 
 // Run only when executed directly as a hook, not when imported by tests.
-if (new URL(import.meta.url).pathname === process.argv[1]) {
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
   run().then(() => process.exit(0)).catch(() => process.exit(0));
 }

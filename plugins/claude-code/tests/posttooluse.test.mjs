@@ -44,4 +44,22 @@ describe('posttooluse', () => {
     // Must not throw or reject
     await run(() => new FailClient(), makeStdin({ tool_name: 'bash', tool_output: LONG }));
   });
+
+  it('does nothing when tool_output is missing', async () => {
+    const client = new MockClient();
+    await run(() => client, makeStdin({ tool_name: 'bash' }));
+    assert.equal(client.calls.length, 0);
+  });
+
+  it('does nothing when stdin is empty', async () => {
+    const client = new MockClient();
+    await run(() => client, async () => '');
+    assert.equal(client.calls.length, 0);
+  });
+
+  it('does nothing when stdin is malformed JSON', async () => {
+    const client = new MockClient();
+    await run(() => client, async () => 'not json');
+    assert.equal(client.calls.length, 0);
+  });
 });
