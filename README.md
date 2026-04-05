@@ -41,47 +41,69 @@ sudo mv engram /usr/local/bin/
 # Or install from source
 go install github.com/pythondatascrape/engram/cmd/engram@latest
 
-# Set up Engram for your project
-cd your-project
-engram install
+# Install for Claude Code — one command, no manual steps
+engram install --claude-code
 
-# See what Engram found
-engram analyze
-
-# Start the compression daemon
-engram serve
+# Restart Claude Code and start using Engram immediately
 ```
+
+### What `engram install --claude-code` does
+
+Starting in v0.3.0, a single install command handles everything:
+
+1. Copies the Engram plugin into `~/.claude/plugins/`
+2. Registers the statusline in `~/.claude/settings.json`
+3. Creates `~/.engram/engram.yaml` with working defaults (if not already present)
+4. Installs the daemon as a background service (launchd on macOS, systemd on Linux)
+5. Starts the service immediately
+6. Verifies the daemon socket and proxy are reachable
+7. **Exits non-zero if any step fails** — no silent partial installs
+
+After install, restart Claude Code. No `engram serve` step required.
 
 ## CLI Reference
 
 | Command | Description |
 |---------|-------------|
-| `engram install` | Interactive setup — detects your tools, configures integration |
+| `engram install --claude-code` | Zero-touch install for Claude Code — daemon, config, and plugin in one step |
+| `engram install --openclaw` | Install for OpenClaw |
+| `engram install` | Auto-detect and install for all supported clients |
 | `engram analyze` | Analyze your project and show compression opportunities |
 | `engram advisor` | Show optimization recommendations based on session data |
-| `engram serve` | Start the compression daemon |
+| `engram serve` | Start the compression daemon manually (advanced) |
 | `engram status` | Show daemon status, active sessions, and savings |
 
 Every command supports `--help` for detailed usage.
 
-## Integrations
+### Common flags
 
-Engram works as a plugin for AI coding tools:
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--config` | `~/.engram/engram.yaml` | Path to configuration file |
+| `--socket` | `~/.engram/engram.sock` | Unix socket path |
+
+## Integrations
 
 ### Claude Code
 
 ```bash
-engram install
-# Engram auto-detects Claude Code and registers as an MCP plugin
+engram install --claude-code
+# Restart Claude Code — compression is active immediately
 ```
 
-Once installed, Engram compresses context automatically — no workflow changes needed.
+Engram registers as a Claude Code plugin and routes all LLM calls through the local proxy. Context is compressed transparently — no workflow changes needed.
+
+**Manual install** (if you prefer explicit steps):
+
+```bash
+engram install --claude-code   # installs plugin + daemon
+engram status                  # confirm daemon is running
+```
 
 ### OpenClaw
 
 ```bash
-engram install
-# Engram auto-detects OpenClaw and configures the integration
+engram install --openclaw
 ```
 
 ### SDKs
@@ -112,6 +134,22 @@ const result = await client.compress({identity: "...", history: [], query: "..."
 ```
 
 See the [Integration Guide](docs/integration-guide.md) for details.
+
+## Configuration
+
+Engram's config file lives at `~/.engram/engram.yaml` and is created automatically during install. The most common settings to adjust:
+
+```yaml
+# ~/.engram/engram.yaml
+server:
+  port: 4433          # daemon JSON-RPC port
+
+proxy:
+  port: 4242          # HTTP proxy port (Claude Code routes through this)
+  window_size: 10     # context window compression depth
+```
+
+Run `engram serve --help` for the full list of options.
 
 ## Demo
 
