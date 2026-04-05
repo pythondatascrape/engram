@@ -86,13 +86,17 @@ the engram compression plugin. Use flags to target a specific client.`,
 					fmt.Fprintf(cmd.OutOrStdout(), "  Claude Code plugin installed to ~/.claude/plugins/cache/engram/engram/%s/\n", pluginVersion)
 					fmt.Fprintln(cmd.OutOrStdout(), "  Statusline registered in ~/.claude/settings.json")
 					if runtime.GOOS == "darwin" {
-						home, _ := os.UserHomeDir()
-						binary, _ := os.Executable()
-						configPath := filepath.Join(home, ".engram", "engram.yaml")
-						if err := installLaunchd(binary, configPath, ""); err != nil {
-							fmt.Fprintf(cmd.ErrOrStderr(), "  warning: daemon service install failed: %v\n", err)
+						home, homeErr := os.UserHomeDir()
+						binary, binErr := os.Executable()
+						if homeErr != nil || binErr != nil {
+							fmt.Fprintf(cmd.ErrOrStderr(), "  warning: daemon service install skipped: %v %v\n", homeErr, binErr)
 						} else {
-							fmt.Fprintln(cmd.OutOrStdout(), "  Daemon installed as launchd service (starts on login)")
+							configPath := filepath.Join(home, ".engram", "engram.yaml")
+							if err := installLaunchd(binary, configPath, ""); err != nil {
+								fmt.Fprintf(cmd.ErrOrStderr(), "  warning: daemon service install failed: %v\n", err)
+							} else {
+								fmt.Fprintln(cmd.OutOrStdout(), "  Daemon installed as launchd service (starts on login)")
+							}
 						}
 					}
 
