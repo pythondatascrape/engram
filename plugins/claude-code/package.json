@@ -1,6 +1,6 @@
 {
   "name": "engram-ccode",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Identity-aware context compression plugin for Claude Code (daemon adapter)",
   "type": "module",
   "main": "server.mjs",

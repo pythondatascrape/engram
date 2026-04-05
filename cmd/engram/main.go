@@ -13,6 +13,7 @@ func main() {
 	rootCmd.AddCommand(newAnalyzeCmd())
 	rootCmd.AddCommand(newAdvisorCmd())
 	rootCmd.AddCommand(newInstallCmd())
+	rootCmd.AddCommand(newUpdateCmd())
 	rootCmd.AddCommand(newStatuslineCmd())
 	rootCmd.AddCommand(newMCPCmd())
 	if err := rootCmd.Execute(); err != nil {

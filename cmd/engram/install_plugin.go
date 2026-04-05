@@ -10,7 +10,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-const pluginVersion = "0.2.0"
+const pluginVersion = "0.2.1"
 
 func newInstallCmd() *cobra.Command {
 	var (
