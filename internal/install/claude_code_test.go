@@ -1,6 +1,7 @@
 package install
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -80,5 +81,52 @@ func TestRegisterOpenClaw_RemovesPreviousInstallation(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join(targetDir, "new.go"))
 	require.NoError(t, err)
 	require.Equal(t, "new", string(data))
+}
+
+func TestRegisterClaudeCodeWithStatusline_WritesStatusLine(t *testing.T) {
+	src := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(src, "server.mjs"), []byte("// plugin"), 0o644))
+
+	fakeHome := t.TempDir()
+	t.Setenv("HOME", fakeHome)
+
+	settingsPath := filepath.Join(fakeHome, "settings.json")
+
+	err := RegisterClaudeCodeWithStatusline(src, "0.2.0", settingsPath)
+	require.NoError(t, err)
+
+	data, err := os.ReadFile(settingsPath)
+	require.NoError(t, err)
+
+	var got map[string]any
+	require.NoError(t, json.Unmarshal(data, &got))
+
+	sl, ok := got["statusLine"].(map[string]any)
+	require.True(t, ok, "statusLine should be a map[string]any")
+	assert.Equal(t, "engram statusline", sl["command"])
+}
+
+func TestRegisterClaudeCodeWithStatusline_PreservesExistingSettings(t *testing.T) {
+	src := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(src, "server.mjs"), []byte("// plugin"), 0o644))
+
+	fakeHome := t.TempDir()
+	t.Setenv("HOME", fakeHome)
+
+	settingsPath := filepath.Join(fakeHome, "settings.json")
+	require.NoError(t, os.WriteFile(settingsPath, []byte(`{"permissions":{"defaultMode":"bypassPermissions"}}`), 0o644))
+
+	require.NoError(t, RegisterClaudeCodeWithStatusline(src, "0.2.0", settingsPath))
+
+	data, err := os.ReadFile(settingsPath)
+	require.NoError(t, err)
+
+	var got map[string]any
+	require.NoError(t, json.Unmarshal(data, &got))
+
+	perms, ok := got["permissions"].(map[string]any)
+	require.True(t, ok, "permissions should be a map[string]any")
+	assert.Equal(t, "bypassPermissions", perms["defaultMode"])
+	assert.NotNil(t, got["statusLine"])
 }
 

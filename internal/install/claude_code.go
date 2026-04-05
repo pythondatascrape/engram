@@ -22,6 +22,23 @@ func RegisterOpenClaw(sourceDir, version string) error {
 	return registerPlugin(sourceDir, version, ".openclaw", "plugins", "engram", "engram")
 }
 
+// RegisterClaudeCodeWithStatusline installs the engram plugin into Claude Code
+// and registers the statusLine entry in ~/.claude/settings.json.
+// settingsPath defaults to ~/.claude/settings.json when empty.
+func RegisterClaudeCodeWithStatusline(sourceDir, version, settingsPath string) error {
+	if err := RegisterClaudeCode(sourceDir, version); err != nil {
+		return err
+	}
+	if settingsPath == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return fmt.Errorf("cannot determine home directory: %w", err)
+		}
+		settingsPath = filepath.Join(home, ".claude", "settings.json")
+	}
+	return MergeClaudeSettings(settingsPath, "engram statusline")
+}
+
 // registerPlugin copies sourceDir into <home>/<pathElems...>/<version>/, removing any
 // previous installation first. os.RemoveAll is a no-op when the target does not exist.
 func registerPlugin(sourceDir, version string, pathElems ...string) error {
