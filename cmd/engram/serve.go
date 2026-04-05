@@ -3,12 +3,14 @@ package main
 import (
 	"context"
 	"fmt"
+	"log"
 	"log/slog"
 	"os"
 	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"syscall"
+	"time"
 
 	"github.com/pythondatascrape/engram/internal/config"
 	"github.com/pythondatascrape/engram/internal/daemon"
@@ -17,6 +19,7 @@ import (
 	"github.com/pythondatascrape/engram/internal/plugin/registry"
 	"github.com/pythondatascrape/engram/internal/provider"
 	"github.com/pythondatascrape/engram/internal/provider/pool"
+	"github.com/pythondatascrape/engram/internal/proxy"
 	"github.com/pythondatascrape/engram/internal/server"
 	"github.com/pythondatascrape/engram/internal/session"
 	"github.com/pythondatascrape/engram/internal/updater"
@@ -161,6 +164,16 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	slog.Info("engram daemon ready", "socket", socketPath)
 
+	// Start proxy server (non-critical).
+	home, _ := os.UserHomeDir()
+	sessionsDir := filepath.Join(home, ".engram", "sessions")
+	proxySrv := proxy.New(cfg.Proxy.Port, cfg.Proxy.WindowSize, sessionsDir, "https://api.anthropic.com")
+	if err := proxySrv.Start(); err != nil {
+		log.Printf("warn: proxy could not start on :%d: %v", cfg.Proxy.Port, err)
+	} else {
+		log.Printf("proxy listening on :%d", cfg.Proxy.Port)
+	}
+
 	// Wait for shutdown signal.
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
@@ -174,6 +187,10 @@ func runServe(cmd *cobra.Command, args []string) error {
 		}
 	case <-ctx.Done():
 	}
+
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer shutdownCancel()
+	_ = proxySrv.Stop(shutdownCtx)
 
 	srv.Stop()
 	slog.Info("engram daemon stopped")
