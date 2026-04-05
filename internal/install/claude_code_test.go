@@ -173,3 +173,41 @@ func TestRegisterClaudeCodeWithStatusline_DefaultsSettingsPath(t *testing.T) {
 	assert.Equal(t, "engram statusline", sl["command"])
 }
 
+func TestRegisterClaudeCode_CreatesLatestSymlink(t *testing.T) {
+	src := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(src, "server.mjs"), []byte("// plugin"), 0o644))
+
+	t.Setenv("HOME", t.TempDir())
+	home, _ := os.UserHomeDir()
+
+	err := RegisterClaudeCode(src, "v1.2.3")
+	require.NoError(t, err)
+
+	// The versioned directory must exist.
+	versionedDir := filepath.Join(home, ".claude", "plugins", "cache", "engram", "engram", "v1.2.3")
+	_, err = os.Stat(versionedDir)
+	require.NoError(t, err, "versioned install dir should exist")
+
+	// The latest symlink must exist and point to the versioned directory.
+	latestLink := filepath.Join(home, ".claude", "plugins", "cache", "engram", "engram", "latest")
+	target, err := os.Readlink(latestLink)
+	require.NoError(t, err, "latest symlink should exist")
+	assert.Equal(t, "v1.2.3", target, "latest should point to versioned dir by relative name")
+}
+
+func TestRegisterClaudeCode_LatestSymlinkUpdatesOnReinstall(t *testing.T) {
+	src := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(src, "server.mjs"), []byte("// plugin"), 0o644))
+
+	t.Setenv("HOME", t.TempDir())
+
+	require.NoError(t, RegisterClaudeCode(src, "v1.0.0"))
+	require.NoError(t, RegisterClaudeCode(src, "v1.1.0"))
+
+	home, _ := os.UserHomeDir()
+	latestLink := filepath.Join(home, ".claude", "plugins", "cache", "engram", "engram", "latest")
+	target, err := os.Readlink(latestLink)
+	require.NoError(t, err)
+	assert.Equal(t, "v1.1.0", target, "latest should point to newest version after reinstall")
+}
+
