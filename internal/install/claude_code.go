@@ -29,29 +29,35 @@ func RegisterClaudeCodeWithStatusline(sourceDir, version, settingsPath string) e
 	if err := RegisterClaudeCode(sourceDir, version); err != nil {
 		return err
 	}
-	if settingsPath == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return fmt.Errorf("cannot determine home directory: %w", err)
-		}
-		settingsPath = filepath.Join(home, ".claude", "settings.json")
+	sp, err := resolveSettingsPath(settingsPath)
+	if err != nil {
+		return err
 	}
-	return MergeClaudeSettings(settingsPath, "engram statusline")
+	return MergeClaudeSettings(sp, "engram statusline")
 }
 
 // RegisterProxyHeaders configures the Claude Code settings file at settingsPath
 // to route API traffic through the engram proxy on the given port.
 // settingsPath defaults to ~/.claude/settings.json when empty.
-// It delegates to MergeProxySettings.
 func RegisterProxyHeaders(settingsPath string, port int) error {
-	if settingsPath == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return fmt.Errorf("cannot determine home directory: %w", err)
-		}
-		settingsPath = filepath.Join(home, ".claude", "settings.json")
+	sp, err := resolveSettingsPath(settingsPath)
+	if err != nil {
+		return err
 	}
-	return MergeProxySettings(settingsPath, port)
+	return MergeProxySettings(sp, port)
+}
+
+// resolveSettingsPath returns settingsPath unchanged when non-empty,
+// or ~/.claude/settings.json as the default.
+func resolveSettingsPath(settingsPath string) (string, error) {
+	if settingsPath != "" {
+		return settingsPath, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("cannot determine home directory: %w", err)
+	}
+	return filepath.Join(home, ".claude", "settings.json"), nil
 }
 
 // registerPlugin copies sourceDir into <home>/<pathElems...>/<version>/, removing any

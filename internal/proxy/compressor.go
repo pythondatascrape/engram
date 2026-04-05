@@ -48,8 +48,12 @@ func compressHead(msgs []AnthropicMessage) string {
 	parts := make([]string, len(msgs))
 	for i, m := range msgs {
 		text := messageText(m)
-		if runes := []rune(text); len(runes) > 120 {
-			text = string(runes[:120])
+		// Only convert to runes when the byte length could exceed the limit,
+		// avoiding allocation for the common short-message case.
+		if len(text) > 120 {
+			if runes := []rune(text); len(runes) > 120 {
+				text = string(runes[:120])
+			}
 		}
 		parts[i] = m.Role + ": " + text
 	}

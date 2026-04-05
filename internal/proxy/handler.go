@@ -8,6 +8,10 @@ import (
 	"net/http"
 )
 
+// engramSessionHeader is the request header used to pass the session ID from
+// Claude Code to the proxy. Stripped before forwarding to Anthropic.
+const engramSessionHeader = "X-Engram-Session"
+
 // Handler implements http.Handler for the Anthropic-compatible proxy.
 type Handler struct {
 	windowSize  int
@@ -59,7 +63,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Determine session ID.
-	sessionID := r.Header.Get("X-Engram-Session")
+	sessionID := r.Header.Get(engramSessionHeader)
 	if sessionID == "" {
 		sessionID = SessionID(req.System)
 	}
@@ -109,16 +113,12 @@ func (h *Handler) forwardWithBody(w http.ResponseWriter, r *http.Request, body [
 		return
 	}
 
-	// Copy headers from original request, skip Content-Length (we set it ourselves)
-	// and X-Engram-Session (internal routing header, not for Anthropic).
-	for k, vs := range r.Header {
-		if k == "Content-Length" || k == "X-Engram-Session" {
-			continue
-		}
-		for _, v := range vs {
-			upstreamReq.Header.Add(k, v)
-		}
-	}
+	// Clone headers, then drop internal/computed ones before forwarding.
+	// X-Engram-Session is an internal routing header not meant for Anthropic.
+	// Content-Length is set explicitly from the (possibly rewritten) body.
+	upstreamReq.Header = r.Header.Clone()
+	upstreamReq.Header.Del("Content-Length")
+	upstreamReq.Header.Del(engramSessionHeader)
 	upstreamReq.ContentLength = int64(len(body))
 
 	resp, err := h.client.Do(upstreamReq)
