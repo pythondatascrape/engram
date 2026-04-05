@@ -12,53 +12,41 @@ import (
 // RegisterClaudeCode installs the engram plugin into Claude Code.
 // It copies plugin files from sourceDir to ~/.claude/plugins/cache/engram/engram/<version>/.
 func RegisterClaudeCode(sourceDir, version string) error {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return fmt.Errorf("cannot determine home directory: %w", err)
-	}
-
-	targetDir := filepath.Join(home, ".claude", "plugins", "cache", "engram", "engram", version)
-
-	if _, err := os.Stat(targetDir); err == nil {
-		slog.Info("removing previous installation", "path", targetDir)
-		if err := os.RemoveAll(targetDir); err != nil {
-			return fmt.Errorf("remove old installation: %w", err)
-		}
-	}
-
-	slog.Info("installing Claude Code plugin", "source", sourceDir, "target", targetDir)
-	if err := copyDir(sourceDir, targetDir); err != nil {
-		return fmt.Errorf("copy plugin files: %w", err)
-	}
-
-	slog.Info("Claude Code plugin installed", "path", targetDir)
-	return nil
+	return registerPlugin(sourceDir, version, ".claude", "plugins", "cache", "engram", "engram")
 }
 
 // RegisterOpenClaw installs the engram plugin into OpenClaw.
 // It copies plugin files from sourceDir to ~/.openclaw/plugins/engram/engram/<version>/.
+// OpenClaw uses plugins/ directly without a cache/ layer.
 func RegisterOpenClaw(sourceDir, version string) error {
+	return registerPlugin(sourceDir, version, ".openclaw", "plugins", "engram", "engram")
+}
+
+// registerPlugin copies sourceDir into <home>/<pathElems...>/<version>/, removing any
+// previous installation first. os.RemoveAll is a no-op when the target does not exist.
+func registerPlugin(sourceDir, version string, pathElems ...string) error {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return fmt.Errorf("cannot determine home directory: %w", err)
 	}
 
-	// OpenClaw stores plugins directly in plugins/ without the cache/ subdirectory
-	targetDir := filepath.Join(home, ".openclaw", "plugins", "engram", "engram", version)
+	parts := append([]string{home}, pathElems...)
+	parts = append(parts, version)
+	targetDir := filepath.Join(parts...)
 
 	if _, err := os.Stat(targetDir); err == nil {
 		slog.Info("removing previous installation", "path", targetDir)
-		if err := os.RemoveAll(targetDir); err != nil {
-			return fmt.Errorf("remove old openclaw installation: %w", err)
-		}
+	}
+	if err := os.RemoveAll(targetDir); err != nil {
+		return fmt.Errorf("remove old installation: %w", err)
 	}
 
-	slog.Info("installing OpenClaw plugin", "source", sourceDir, "target", targetDir)
+	slog.Info("installing plugin", "source", sourceDir, "target", targetDir)
 	if err := copyDir(sourceDir, targetDir); err != nil {
 		return fmt.Errorf("copy plugin files: %w", err)
 	}
 
-	slog.Info("OpenClaw plugin installed", "path", targetDir)
+	slog.Info("plugin installed", "path", targetDir)
 	return nil
 }
 
