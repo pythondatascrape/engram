@@ -66,6 +66,69 @@ func TestMergeClaudeSettings_OverwritesExistingStatusLine(t *testing.T) {
 	assert.Equal(t, "engram statusline", sl["command"])
 }
 
+func TestMergeProxySettings_CreatesFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".claude", "settings.json")
+
+	require.NoError(t, MergeProxySettings(path, 4242))
+
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+
+	var got map[string]any
+	require.NoError(t, json.Unmarshal(data, &got))
+
+	env, ok := got["env"].(map[string]any)
+	require.True(t, ok, "env should be a map[string]any")
+	assert.Equal(t, "http://localhost:4242", env["ANTHROPIC_BASE_URL"])
+
+	rh, ok := got["requestHeaders"].(map[string]any)
+	require.True(t, ok, "requestHeaders should be a map[string]any")
+	assert.Equal(t, "${session_id}", rh["X-Engram-Session"])
+}
+
+func TestMergeProxySettings_PreservesExistingKeys(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "settings.json")
+	require.NoError(t, os.WriteFile(path, []byte(`{"env":{"FOO":"bar"},"requestHeaders":{"X-Other":"val"}}`), 0o644))
+
+	require.NoError(t, MergeProxySettings(path, 4242))
+
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+
+	var got map[string]any
+	require.NoError(t, json.Unmarshal(data, &got))
+
+	env, ok := got["env"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "bar", env["FOO"])
+	assert.Equal(t, "http://localhost:4242", env["ANTHROPIC_BASE_URL"])
+
+	rh, ok := got["requestHeaders"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "val", rh["X-Other"])
+	assert.Equal(t, "${session_id}", rh["X-Engram-Session"])
+}
+
+func TestMergeProxySettings_UpdatesPort(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "settings.json")
+
+	require.NoError(t, MergeProxySettings(path, 4242))
+	require.NoError(t, MergeProxySettings(path, 9999))
+
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+
+	var got map[string]any
+	require.NoError(t, json.Unmarshal(data, &got))
+
+	env, ok := got["env"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "http://localhost:9999", env["ANTHROPIC_BASE_URL"])
+}
+
 func TestMergeClaudeSettings_ReturnsErrorForInvalidJSON(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "settings.json")

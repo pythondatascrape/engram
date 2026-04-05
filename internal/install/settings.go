@@ -50,6 +50,59 @@ func MergeClaudeSettings(settingsPath, cmd string) error {
 	return os.WriteFile(settingsPath, append(out, '\n'), 0o644)
 }
 
+// MergeProxySettings reads the Claude Code settings file at settingsPath,
+// sets env.ANTHROPIC_BASE_URL to the given port and adds the X-Engram-Session
+// request header. All other keys in env and requestHeaders are preserved.
+// If settingsPath does not exist, it is created along with parent directories.
+func MergeProxySettings(settingsPath string, port int) error {
+	settings := make(map[string]any)
+
+	data, err := os.ReadFile(settingsPath)
+	if err == nil {
+		if err := json.Unmarshal(data, &settings); err != nil {
+			return fmt.Errorf("parse %s: %w", settingsPath, err)
+		}
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("read %s: %w", settingsPath, err)
+	}
+
+	// Merge env
+	env := make(map[string]any)
+	if existing, ok := settings["env"].(map[string]any); ok {
+		for k, v := range existing {
+			env[k] = v
+		}
+	}
+	env["ANTHROPIC_BASE_URL"] = fmt.Sprintf("http://localhost:%d", port)
+	settings["env"] = env
+
+	// Merge requestHeaders
+	rh := make(map[string]any)
+	if existing, ok := settings["requestHeaders"].(map[string]any); ok {
+		for k, v := range existing {
+			rh[k] = v
+		}
+	}
+	rh["X-Engram-Session"] = "${session_id}"
+	settings["requestHeaders"] = rh
+
+	out, err := json.MarshalIndent(settings, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal settings: %w", err)
+	}
+
+	if err := os.MkdirAll(filepath.Dir(settingsPath), 0o755); err != nil {
+		return fmt.Errorf("create settings dir: %w", err)
+	}
+
+	tmp := settingsPath + ".tmp"
+	if err := os.WriteFile(tmp, append(out, '\n'), 0o644); err != nil {
+		return fmt.Errorf("write tmp settings: %w", err)
+	}
+	slog.Info("merged proxy settings", "path", settingsPath, "port", port)
+	return os.Rename(tmp, settingsPath)
+}
+
 // resolvePluginDir returns the path where the engram plugin is installed,
 // derived from the settings file location.
 func resolvePluginDir(settingsPath string) string {
