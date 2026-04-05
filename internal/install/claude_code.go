@@ -89,7 +89,7 @@ func registerPlugin(sourceDir, version string, pathElems ...string) error {
 	// Create/update the "latest" symlink so the hook path registered by MergeClaudeSettings
 	// (which hardcodes "latest") always resolves to the currently installed version.
 	latestLink := filepath.Join(filepath.Dir(targetDir), "latest")
-	_ = os.Remove(latestLink) // remove stale symlink or dir; no-op if absent
+	_ = os.Remove(latestLink) // drop any stale link before creating the new one
 	if err := os.Symlink(version, latestLink); err != nil {
 		return fmt.Errorf("create latest symlink: %w", err)
 	}
