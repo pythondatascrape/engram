@@ -163,15 +163,13 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	slog.Info("engram daemon ready", "socket", socketPath)
 
-	// Start proxy server (non-critical).
 	home, _ := os.UserHomeDir()
 	sessionsDir := filepath.Join(home, ".engram", "sessions")
 	proxySrv := proxy.New(cfg.Proxy.Port, cfg.Proxy.WindowSize, sessionsDir, "https://api.anthropic.com")
 	if err := proxySrv.Start(); err != nil {
-		slog.Warn("proxy could not start", "port", cfg.Proxy.Port, "err", err)
-	} else {
-		slog.Info("proxy listening", "port", cfg.Proxy.Port)
+		return fmt.Errorf("start proxy on :%d: %w", cfg.Proxy.Port, err)
 	}
+	slog.Info("proxy listening", "port", cfg.Proxy.Port)
 
 	// Wait for shutdown signal.
 	sigCh := make(chan os.Signal, 1)
