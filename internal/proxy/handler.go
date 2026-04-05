@@ -12,9 +12,7 @@ import (
 // Claude Code to the proxy. Stripped before forwarding to Anthropic.
 const engramSessionHeader = "X-Engram-Session"
 
-// isPlaceholder reports whether s is an unresolved template variable
-// (e.g. "${session_id}" as written by engram install into Claude Code settings).
-// These values are not real session IDs and must fall back to fingerprinting.
+// isPlaceholder reports whether s looks like an unresolved shell template variable (e.g. "${session_id}").
 func isPlaceholder(s string) bool {
 	return len(s) > 3 && s[0] == '$' && s[1] == '{' && s[len(s)-1] == '}'
 }
