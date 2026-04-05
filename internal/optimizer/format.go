@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"unicode/utf8"
 )
 
 // FormatReport writes a human-readable prioritized savings report to w.
@@ -125,21 +126,23 @@ func FormatStatuslineSideBySide(w io.Writer, d StatuslineData, ctx ContextData) 
 	ctxSaved := ctxOrig - ctx.Comp
 	ctxSavePct := percent(ctxSaved, ctxOrig)
 
-	// Row 1: orig
-	fmt.Fprintf(w, "orig  %s %d    orig  %s %s\n",
-		bar(d.Orig, orig, 20), d.Orig,
-		bar(ctx.Orig, ctx.Orig, 20), fmtK(ctx.Orig),
-	)
-	// Row 2: comp
-	fmt.Fprintf(w, "comp  %s %d    comp  %s %s\n",
-		bar(d.Comp, orig, 20), d.Comp,
-		bar(ctx.Comp, ctx.Orig, 20), fmtK(ctx.Comp),
-	)
-	// Row 3: saved — identity shows "N (N%)", context shows "N%" only
-	fmt.Fprintf(w, "saved %s %d (%d%%)    saved %s %d%%\n",
-		bar(d.Saved, orig, 20), d.Saved, idSavePct,
-		bar(ctxSaved, ctxOrig, 20), ctxSavePct,
-	)
+	// Build left-column rows as strings so we can pad them to equal visual
+	// width before appending the right column. The saved row is always the
+	// longest because of the " (N%)" suffix, so rows 1 and 2 are padded to
+	// match it. Padding uses rune count (not byte count) because the bar
+	// characters are multi-byte UTF-8 but single-width glyphs.
+	leftOrig  := fmt.Sprintf("orig  %s %d", bar(d.Orig, orig, 20), d.Orig)
+	leftComp  := fmt.Sprintf("comp  %s %d", bar(d.Comp, orig, 20), d.Comp)
+	leftSaved := fmt.Sprintf("saved %s %d (%d%%)", bar(d.Saved, orig, 20), d.Saved, idSavePct)
+
+	colWidth := utf8.RuneCountInString(leftSaved)
+	leftOrig += strings.Repeat(" ", colWidth-utf8.RuneCountInString(leftOrig))
+	leftComp += strings.Repeat(" ", colWidth-utf8.RuneCountInString(leftComp))
+
+	fmt.Fprintf(w, "%s    orig  %s %s\n", leftOrig, bar(ctx.Orig, ctx.Orig, 20), fmtK(ctx.Orig))
+	fmt.Fprintf(w, "%s    comp  %s %s\n", leftComp, bar(ctx.Comp, ctx.Orig, 20), fmtK(ctx.Comp))
+	// saved row: identity shows "N (N%)", context shows "N%" only
+	fmt.Fprintf(w, "%s    saved %s %d%%\n", leftSaved, bar(ctxSaved, ctxOrig, 20), ctxSavePct)
 }
 
 func percent(saved, original int) int {
