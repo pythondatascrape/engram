@@ -14,6 +14,7 @@ import (
 
 func newStatuslineCmd() *cobra.Command {
 	var sessionID string
+	var ctxOrig, ctxComp int
 
 	cmd := &cobra.Command{
 		Use:   "statusline [directory]",
@@ -72,7 +73,11 @@ stdin automatically so each terminal session shows its own stats.`,
 							Saved: s.TotalSaved,
 							Live:  true,
 						}
-						optimizer.FormatStatusline(os.Stdout, data)
+						if ctxOrig > 0 && ctxComp > 0 {
+							optimizer.FormatStatuslineSideBySide(os.Stdout, data, optimizer.ContextData{Orig: ctxOrig, Comp: ctxComp})
+						} else {
+							optimizer.FormatStatusline(os.Stdout, data)
+						}
 						if v := updater.ReadAvailableUpdate(); v != "" {
 							fmt.Fprintf(os.Stdout, "update %s available — run: engram update\n", v)
 						}
@@ -113,7 +118,11 @@ stdin automatically so each terminal session shows its own stats.`,
 				}
 			}
 
-			optimizer.FormatStatusline(os.Stdout, data)
+			if ctxOrig > 0 && ctxComp > 0 {
+				optimizer.FormatStatuslineSideBySide(os.Stdout, data, optimizer.ContextData{Orig: ctxOrig, Comp: ctxComp})
+			} else {
+				optimizer.FormatStatusline(os.Stdout, data)
+			}
 
 			if v := updater.ReadAvailableUpdate(); v != "" {
 				fmt.Fprintf(os.Stdout, "update %s available — run: engram update\n", v)
@@ -124,6 +133,8 @@ stdin automatically so each terminal session shows its own stats.`,
 	}
 
 	cmd.Flags().StringVar(&sessionID, "session-id", "", "Scope stats to a specific session (auto-detected from stdin when used as a statusLine command)")
+	cmd.Flags().IntVar(&ctxOrig, "ctx-orig", 0, "Context tokens without Engram (enables side-by-side view)")
+	cmd.Flags().IntVar(&ctxComp, "ctx-comp", 0, "Context tokens with Engram")
 
 	return cmd
 }
