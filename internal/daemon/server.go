@@ -418,12 +418,14 @@ func (s *Server) engramGenerateReport(params json.RawMessage) (interface{}, erro
 		"- Tokens before: %d\n"+
 		"- Tokens after: %d\n"+
 		"- Tokens saved: %d\n"+
-		"- Estimated savings: %.1f%%\n",
+		"- Estimated savings: %.1f%%\n"+
+		"- Redundancy hits: %d\n",
 		snap.TotalCalls,
 		snap.TotalOriginalTokens,
 		snap.TotalCompressedTokens,
 		snap.TotalSaved,
 		savingsPct,
+		snap.TotalRedundancyHits,
 	)
 
 	return map[string]interface{}{

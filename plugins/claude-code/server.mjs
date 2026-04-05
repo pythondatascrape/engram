@@ -26,9 +26,10 @@ const TOOLS = [
     inputSchema: {
       type: 'object',
       properties: {
-        dimensions: { type: 'object', description: 'Dimension key/value map to compress. If not provided, uses active codebook dimensions.' },
-        originalTokens: { type: 'number', description: 'Token count of the prose identity being replaced (e.g. CLAUDE.md). Enables accurate savings reporting.' },
+        dimensions: { type: 'object', description: 'Dimension key/value map to compress.' },
+        originalTokens: { type: 'number', description: 'Token count of the prose identity being replaced (e.g. CLAUDE.md). Required for accurate savings reporting.' },
       },
+      required: ['originalTokens'],
     },
   },
   {
