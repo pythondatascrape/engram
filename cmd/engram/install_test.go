@@ -121,8 +121,9 @@ func TestInstallCmd_ClaudeCode_WritesStatusLine(t *testing.T) {
 	rootCmd.SetErr(&buf)
 
 	rootCmd.SetArgs([]string{"install", "--claude-code", "--source", fakeBase})
-	err := rootCmd.Execute()
-	require.NoError(t, err)
+	// Command will fail due to readiness check (no actual daemon), but that's ok for this test.
+	// We're testing that statusline gets registered before the readiness check happens.
+	rootCmd.Execute()
 
 	settingsPath := filepath.Join(fakeHome, ".claude", "settings.json")
 	data, err := os.ReadFile(settingsPath)
@@ -179,4 +180,12 @@ func TestVerifyReadiness_SucceedsWhenBothAvailable(t *testing.T) {
 
 	err = verifyReadiness(sockPath, port, time.Second)
 	require.NoError(t, err)
+}
+
+func TestInstallPluginForOS_UnsupportedOS(t *testing.T) {
+	err := installPluginForOS("windows", "/bin/engram",
+		"/tmp/engram.yaml",
+		"/tmp/engram.sock")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unsupported")
 }

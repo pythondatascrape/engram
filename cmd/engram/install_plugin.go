@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"time"
 
 	"github.com/pythondatascrape/engram/internal/config"
 	"github.com/pythondatascrape/engram/internal/install"
@@ -13,6 +14,28 @@ import (
 )
 
 const pluginVersion = "0.2.1"
+
+// installPluginForOS installs the background service for the given GOOS value,
+// then verifies the daemon is reachable. Returns an error for unsupported OSes
+// or if any step fails.
+func installPluginForOS(goos, binary, configPath, socketPath string) error {
+	switch goos {
+	case "darwin":
+		if err := installLaunchd(binary, configPath, socketPath); err != nil {
+			return fmt.Errorf("daemon service install: %w", err)
+		}
+	case "linux":
+		if err := installSystemd(binary, configPath, socketPath); err != nil {
+			return fmt.Errorf("daemon service install: %w", err)
+		}
+	default:
+		return fmt.Errorf("daemon service install: unsupported OS %q — run `engram serve` manually", goos)
+	}
+	if err := verifyReadiness(socketPath, config.DefaultProxyPort, 15*time.Second); err != nil {
+		return fmt.Errorf("post-install readiness check failed: %w", err)
+	}
+	return nil
+}
 
 func newInstallCmd() *cobra.Command {
 	var (
@@ -110,28 +133,14 @@ the engram compression plugin. Use flags to target a specific client.`,
 
 					// Install and start background service.
 					socketFilePath := DefaultSocketPath()
-					switch runtime.GOOS {
-					case "darwin":
-						binary, binErr := os.Executable()
-						if binErr != nil {
-							return fmt.Errorf("daemon service install: resolve binary: %w", binErr)
-						}
-						if err := installLaunchd(binary, configFilePath, socketFilePath); err != nil {
-							return fmt.Errorf("daemon service install: %w", err)
-						}
-						fmt.Fprintln(cmd.OutOrStdout(), "  Daemon installed as launchd service (starts on login)")
-					case "linux":
-						binary, binErr := os.Executable()
-						if binErr != nil {
-							return fmt.Errorf("daemon service install: resolve binary: %w", binErr)
-						}
-						if err := installSystemd(binary, configFilePath, socketFilePath); err != nil {
-							return fmt.Errorf("daemon service install: %w", err)
-						}
-						fmt.Fprintln(cmd.OutOrStdout(), "  Daemon installed as systemd user service")
-					default:
-						return fmt.Errorf("daemon service install: unsupported OS %q — run `engram serve` manually", runtime.GOOS)
+					binary, binErr := os.Executable()
+					if binErr != nil {
+						return fmt.Errorf("daemon service install: resolve binary: %w", binErr)
 					}
+					if err := installPluginForOS(runtime.GOOS, binary, configFilePath, socketFilePath); err != nil {
+						return fmt.Errorf("install Claude Code daemon: %w", err)
+					}
+					fmt.Fprintln(cmd.OutOrStdout(), "  Daemon installed and running")
 
 				case "openclaw":
 					if err := install.RegisterOpenClaw(src, pluginVersion); err != nil {
