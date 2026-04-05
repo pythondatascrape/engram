@@ -109,6 +109,14 @@ export async function run(stdinFn = readStdin) {
   // Atomic rename so partial writes never corrupt the file.
   const { renameSync } = await import('fs');
   renameSync(tmp, sessionFile);
+
+  // Write PID → session_id mapping so statusline-command.sh can identify
+  // the right session file. The statusLine payload lacks session_id, but
+  // both this hook and the statusline script share the same Claude Code
+  // parent PID, making process.ppid a stable per-terminal key.
+  const pidDir = join(sessionsDir, 'by-pid');
+  mkdirSync(pidDir, { recursive: true });
+  writeFileSync(join(pidDir, String(process.ppid)), sessionId + '\n', { mode: 0o600 });
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
