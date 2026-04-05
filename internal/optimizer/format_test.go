@@ -8,6 +8,58 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+func TestFmtK(t *testing.T) {
+	assert.Equal(t, "0", fmtK(0))
+	assert.Equal(t, "42", fmtK(42))
+	assert.Equal(t, "999", fmtK(999))
+	assert.Equal(t, "1K", fmtK(1000))
+	assert.Equal(t, "1K", fmtK(1499))
+	assert.Equal(t, "2K", fmtK(1500))
+	assert.Equal(t, "44K", fmtK(44300))
+	assert.Equal(t, "45K", fmtK(45000))
+}
+
+func TestFormatStatuslineSideBySide_RendersThreeRows(t *testing.T) {
+	var buf bytes.Buffer
+	d := StatuslineData{Orig: 525, Comp: 28, Saved: 497, Live: true}
+	ctx := ContextData{Orig: 45000, Comp: 44499}
+	FormatStatuslineSideBySide(&buf, d, ctx)
+	out := buf.String()
+
+	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+	assert.Len(t, lines, 3)
+	assert.Contains(t, lines[0], "orig")
+	assert.Contains(t, lines[0], "525")
+	assert.Contains(t, lines[0], "45K")
+	assert.Contains(t, lines[1], "comp")
+	assert.Contains(t, lines[1], "28")
+	assert.Contains(t, lines[1], "44K")
+	assert.Contains(t, lines[2], "saved")
+	assert.Contains(t, lines[2], "497")
+	assert.Contains(t, lines[2], "%")
+}
+
+func TestFormatStatuslineSideBySide_ZeroSaved(t *testing.T) {
+	var buf bytes.Buffer
+	d := StatuslineData{Orig: 100, Comp: 100, Saved: 0, Live: true}
+	ctx := ContextData{Orig: 5000, Comp: 5000}
+	FormatStatuslineSideBySide(&buf, d, ctx)
+	out := buf.String()
+	assert.Contains(t, out, "0%")
+}
+
+func TestFormatStatuslineSideBySide_SubKContext(t *testing.T) {
+	var buf bytes.Buffer
+	d := StatuslineData{Orig: 75, Comp: 4, Saved: 71, Live: true}
+	ctx := ContextData{Orig: 800, Comp: 729}
+	FormatStatuslineSideBySide(&buf, d, ctx)
+	out := buf.String()
+	// Sub-1K values render as plain numbers, no K suffix
+	assert.NotContains(t, out, "800K")
+	assert.Contains(t, out, "800")
+	assert.Contains(t, out, "729")
+}
+
 func TestFormatReport_ContainsAllSections(t *testing.T) {
 	report := &SavingsReport{
 		Items: []SavingsItem{

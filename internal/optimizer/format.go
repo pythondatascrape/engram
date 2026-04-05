@@ -95,6 +95,53 @@ func FormatStatusline(w io.Writer, d StatuslineData) {
 	fmt.Fprintf(w, "saved %s %d (%d%%)\n", bar(d.Saved, orig, 20), d.Saved, savePct)
 }
 
+// ContextData holds token counts for context window impact display.
+type ContextData struct {
+	Orig int // context tokens without Engram (actual + saved)
+	Comp int // context tokens with Engram (actual input tokens)
+}
+
+// fmtK formats a token count as a plain number below 1000, or rounded K above.
+func fmtK(n int) string {
+	if n < 1000 {
+		return fmt.Sprintf("%d", n)
+	}
+	return fmt.Sprintf("%dK", (n+500)/1000)
+}
+
+// FormatStatuslineSideBySide renders identity stats (left) and context stats
+// (right) on the same three lines, separated by four spaces.
+func FormatStatuslineSideBySide(w io.Writer, d StatuslineData, ctx ContextData) {
+	orig := d.Orig
+	if orig == 0 {
+		orig = 1
+	}
+	idSavePct := percent(d.Saved, orig)
+
+	ctxOrig := ctx.Orig
+	if ctxOrig == 0 {
+		ctxOrig = 1
+	}
+	ctxSaved := ctxOrig - ctx.Comp
+	ctxSavePct := percent(ctxSaved, ctxOrig)
+
+	// Row 1: orig
+	fmt.Fprintf(w, "orig  %s %d    orig  %s %s\n",
+		bar(d.Orig, orig, 20), d.Orig,
+		bar(ctx.Orig, ctx.Orig, 20), fmtK(ctx.Orig),
+	)
+	// Row 2: comp
+	fmt.Fprintf(w, "comp  %s %d    comp  %s %s\n",
+		bar(d.Comp, orig, 20), d.Comp,
+		bar(ctx.Comp, ctx.Orig, 20), fmtK(ctx.Comp),
+	)
+	// Row 3: saved — identity shows "N (N%)", context shows "N%" only
+	fmt.Fprintf(w, "saved %s %d (%d%%)    saved %s %d%%\n",
+		bar(d.Saved, orig, 20), d.Saved, idSavePct,
+		bar(ctxSaved, ctxOrig, 20), ctxSavePct,
+	)
+}
+
 func percent(saved, original int) int {
 	if original == 0 {
 		return 0
