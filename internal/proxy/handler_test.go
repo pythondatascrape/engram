@@ -152,9 +152,9 @@ func TestXEngramSessionHeader(t *testing.T) {
 	})
 	<-done
 
-	path := filepath.Join(dir, "my-session-id.json")
+	path := filepath.Join(dir, "my-session-id.ctx.json")
 	if _, err := os.Stat(path); err != nil {
-		t.Fatalf("expected session file %s, got err: %v", path, err)
+		t.Fatalf("expected ctx file %s, got err: %v", path, err)
 	}
 }
 
@@ -171,9 +171,9 @@ func TestSystemPromptFingerprintFallback(t *testing.T) {
 	<-done
 
 	expectedID := SessionID("some text")
-	path := filepath.Join(dir, expectedID+".json")
+	path := filepath.Join(dir, expectedID+".ctx.json")
 	if _, err := os.Stat(path); err != nil {
-		t.Fatalf("expected session file %s, got err: %v", path, err)
+		t.Fatalf("expected ctx file %s, got err: %v", path, err)
 	}
 }
 
@@ -191,7 +191,7 @@ func TestStatsWritten(t *testing.T) {
 	})
 	<-done
 
-	data, err := os.ReadFile(filepath.Join(dir, "stats-session.json"))
+	data, err := os.ReadFile(filepath.Join(dir, "stats-session.ctx.json"))
 	if err != nil {
 		t.Fatalf("read stats file: %v", err)
 	}
@@ -244,11 +244,11 @@ func TestPlaceholderSessionIDFallsBackToFingerprint(t *testing.T) {
 	// The stats file must be named after the fingerprint of the system prompt,
 	// NOT the literal string "${session_id}".
 	expected := SessionID("my-system-prompt")
-	if _, err := os.Stat(filepath.Join(dir, expected+".json")); err != nil {
-		t.Fatalf("expected fingerprint file %s.json, got: %v", expected, err)
+	if _, err := os.Stat(filepath.Join(dir, expected+".ctx.json")); err != nil {
+		t.Fatalf("expected fingerprint file %s.ctx.json, got: %v", expected, err)
 	}
 	// Also assert the placeholder file was NOT created.
-	if _, err := os.Stat(filepath.Join(dir, "${session_id}.json")); err == nil {
-		t.Fatal("placeholder file ${session_id}.json should not have been created")
+	if _, err := os.Stat(filepath.Join(dir, "${session_id}.ctx.json")); err == nil {
+		t.Fatal("placeholder file ${session_id}.ctx.json should not have been created")
 	}
 }

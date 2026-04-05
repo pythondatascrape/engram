@@ -34,15 +34,17 @@ func TestSessionID_EmptyPromptStable(t *testing.T) {
 	}
 }
 
-func TestWriteStats_CreatesFileWithCtxFields(t *testing.T) {
+func TestWriteStats_CreatesCtxFile(t *testing.T) {
 	dir := t.TempDir()
 	err := WriteStats(dir, "test-session", 1000, 300)
 	if err != nil {
 		t.Fatalf("WriteStats failed: %v", err)
 	}
-	data, err := os.ReadFile(filepath.Join(dir, "test-session.json"))
+	// Must write to .ctx.json, not .json
+	ctxPath := filepath.Join(dir, "test-session.ctx.json")
+	data, err := os.ReadFile(ctxPath)
 	if err != nil {
-		t.Fatalf("session file not created: %v", err)
+		t.Fatalf("ctx file not created at %s: %v", ctxPath, err)
 	}
 	var got map[string]any
 	if err := json.Unmarshal(data, &got); err != nil {
@@ -56,33 +58,44 @@ func TestWriteStats_CreatesFileWithCtxFields(t *testing.T) {
 	}
 }
 
-func TestWriteStats_PreservesExistingFields(t *testing.T) {
+func TestWriteStats_DoesNotTouchMainSessionFile(t *testing.T) {
 	dir := t.TempDir()
-	// Write an existing session file with stop-hook fields.
-	existing := `{"session_id":"test-session","turns":5,"total_saved":355}`
-	os.WriteFile(filepath.Join(dir, "test-session.json"), []byte(existing), 0600)
+	// Simulate a stop-hook-written session file.
+	mainFile := filepath.Join(dir, "test-session.json")
+	os.WriteFile(mainFile, []byte(`{"session_id":"test-session","turns":5}`), 0o600)
 
-	err := WriteStats(dir, "test-session", 2000, 500)
-	if err != nil {
+	if err := WriteStats(dir, "test-session", 500, 100); err != nil {
 		t.Fatalf("WriteStats failed: %v", err)
 	}
-	data, _ := os.ReadFile(filepath.Join(dir, "test-session.json"))
+
+	// Main session file must be untouched.
+	data, _ := os.ReadFile(mainFile)
 	var got map[string]any
 	json.Unmarshal(data, &got)
-
-	// Existing fields preserved
-	if got["turns"] != float64(5) {
-		t.Errorf("expected turns=5 preserved, got %v", got["turns"])
+	if got["ctx_orig"] != nil {
+		t.Errorf("WriteStats must not write ctx_orig to the main session file; got %v", got["ctx_orig"])
 	}
-	// Ctx fields updated
-	if got["ctx_orig"] != float64(2000) {
-		t.Errorf("expected ctx_orig=2000, got %v", got["ctx_orig"])
+	if got["turns"] != float64(5) {
+		t.Errorf("main session file should be unchanged; turns=%v", got["turns"])
+	}
+}
+
+func TestWriteStats_OnlyWritesCtxFields(t *testing.T) {
+	dir := t.TempDir()
+	if err := WriteStats(dir, "only-ctx", 999, 111); err != nil {
+		t.Fatalf("WriteStats failed: %v", err)
+	}
+	data, _ := os.ReadFile(filepath.Join(dir, "only-ctx.ctx.json"))
+	var got map[string]any
+	json.Unmarshal(data, &got)
+	// Exactly two keys.
+	if len(got) != 2 {
+		t.Errorf("ctx file should contain exactly ctx_orig and ctx_comp, got keys: %v", got)
 	}
 }
 
 func TestWriteStats_AtomicWrite(t *testing.T) {
 	dir := t.TempDir()
-	// Run multiple concurrent writes and ensure file is never corrupted.
 	done := make(chan error, 10)
 	for i := 0; i < 10; i++ {
 		go func(n int) {
@@ -94,12 +107,12 @@ func TestWriteStats_AtomicWrite(t *testing.T) {
 			t.Errorf("concurrent WriteStats failed: %v", err)
 		}
 	}
-	data, err := os.ReadFile(filepath.Join(dir, "concurrent.json"))
+	data, err := os.ReadFile(filepath.Join(dir, "concurrent.ctx.json"))
 	if err != nil {
-		t.Fatal("session file not created after concurrent writes")
+		t.Fatal("ctx file not created after concurrent writes")
 	}
 	var got map[string]any
 	if err := json.Unmarshal(data, &got); err != nil {
-		t.Errorf("session file corrupted after concurrent writes: %v", err)
+		t.Errorf("ctx file corrupted after concurrent writes: %v", err)
 	}
 }
