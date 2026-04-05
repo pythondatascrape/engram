@@ -87,12 +87,15 @@ func TestMessagesCompressed(t *testing.T) {
 	srv, received := fakeAnthropic(t)
 	defer srv.Close()
 
+	done := make(chan struct{}, 1)
 	h := NewHandler(5, t.TempDir(), srv.URL)
+	h.afterStats = func() { done <- struct{}{} }
 	msgs := makeMessages(15)
 	resp := postMessages(t, h, msgs, "sys", nil)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
 	}
+	<-done
 
 	var parsed struct {
 		Messages []AnthropicMessage `json:"messages"`
@@ -117,9 +120,12 @@ func TestBelowWindowSizeNoCompression(t *testing.T) {
 	srv, received := fakeAnthropic(t)
 	defer srv.Close()
 
+	done := make(chan struct{}, 1)
 	h := NewHandler(10, t.TempDir(), srv.URL)
+	h.afterStats = func() { done <- struct{}{} }
 	msgs := makeMessages(3)
 	postMessages(t, h, msgs, "sys", nil)
+	<-done
 
 	var parsed struct {
 		Messages []AnthropicMessage `json:"messages"`
