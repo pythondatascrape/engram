@@ -296,7 +296,8 @@ func (s *Server) engramDeriveCodebook(params json.RawMessage) (interface{}, erro
 
 func (s *Server) engramCompressIdentity(params json.RawMessage) (interface{}, error) {
 	var p struct {
-		Dimensions map[string]string `json:"dimensions"`
+		Dimensions     map[string]string `json:"dimensions"`
+		OriginalTokens int               `json:"originalTokens"` // token count of the prose identity being replaced
 	}
 	if err := json.Unmarshal(params, &p); err != nil {
 		return nil, fmt.Errorf("invalid params: %w", err)
@@ -304,10 +305,8 @@ func (s *Server) engramCompressIdentity(params json.RawMessage) (interface{}, er
 
 	// Serialize dimensions to deterministic sorted key=value format.
 	keys := make([]string, 0, len(p.Dimensions))
-	origBytes := 0
-	for k, v := range p.Dimensions {
+	for k := range p.Dimensions {
 		keys = append(keys, k)
-		origBytes += len(k) + len(v) + 2 // rough: k=v + separator
 	}
 	sort.Strings(keys)
 	parts := make([]string, len(keys))
@@ -317,17 +316,34 @@ func (s *Server) engramCompressIdentity(params json.RawMessage) (interface{}, er
 	compressed := strings.Join(parts, " ")
 
 	// byte/4 is a standard rough token approximation.
-	origTokens := origBytes / 4
 	compTokens := len(compressed) / 4
+
+	// If the caller supplied the prose identity size, use that as the baseline so
+	// the stats reflect the real savings (prose → codebook), not key=value → key=value.
+	origTokens := p.OriginalTokens
+	if origTokens <= 0 {
+		origBytes := 0
+		for k, v := range p.Dimensions {
+			origBytes += len(k) + len(v) + 2 // rough: k=v + separator
+		}
+		origTokens = origBytes / 4
+	}
+
 	s.engramStats.record(origTokens, compTokens)
 	s.flushStats()
 
+	saved := origTokens - compTokens
+	if saved < 0 {
+		saved = 0
+	}
 	return map[string]interface{}{
 		"serialized": compressed,
+		"block":      "[identity]\n" + compressed + "\n[/identity]",
 		"stats": map[string]int{
-			"originalTokens":   origTokens,
-			"compressedTokens": compTokens,
-			"saved":            origTokens - compTokens,
+			"original":   origTokens,
+			"compressed": compTokens,
+			"saved":      saved,
+			"ratio":      saved * 100 / max(origTokens, 1),
 		},
 	}, nil
 }

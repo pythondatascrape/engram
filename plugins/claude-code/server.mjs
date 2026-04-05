@@ -27,6 +27,7 @@ const TOOLS = [
       type: 'object',
       properties: {
         dimensions: { type: 'object', description: 'Dimension key/value map to compress. If not provided, uses active codebook dimensions.' },
+        originalTokens: { type: 'number', description: 'Token count of the prose identity being replaced (e.g. CLAUDE.md). Enables accurate savings reporting.' },
       },
     },
   },
