@@ -105,10 +105,14 @@ func installService(cmd *cobra.Command) error {
 	configPath, _ := cmd.Flags().GetString("config")
 	socketPath, _ := cmd.Flags().GetString("socket")
 
-	// Make config path absolute.
-	if !filepath.IsAbs(configPath) {
+	if configPath == "" || configPath == "engram.yaml" {
+		configPath = DefaultConfigPath()
+	} else if !filepath.IsAbs(configPath) {
 		wd, _ := os.Getwd()
 		configPath = filepath.Join(wd, configPath)
+	}
+	if socketPath == "" {
+		socketPath = DefaultSocketPath()
 	}
 
 	switch runtime.GOOS {

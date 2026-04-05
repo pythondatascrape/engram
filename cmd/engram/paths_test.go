@@ -32,3 +32,10 @@ func TestDefaultSessionsDir_UnderHome(t *testing.T) {
 		t.Errorf("DefaultSessionsDir() = %q, want prefix %q", got, home)
 	}
 }
+
+func TestDefaultSocketPath_MatchesServeDefault(t *testing.T) {
+	got := DefaultSocketPath()
+	if got == "" {
+		t.Error("DefaultSocketPath() returned empty string")
+	}
+}

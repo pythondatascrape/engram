@@ -15,7 +15,7 @@ func newStatusCmd() *cobra.Command {
 		Long:  "Connect to the running Engram daemon and display health information\nincluding active sessions, total turns processed, tokens saved, and uptime.",
 		RunE:  runStatus,
 	}
-	cmd.Flags().String("socket", defaultSocketPath(), "Unix socket path")
+	cmd.Flags().String("socket", DefaultSocketPath(), "Unix socket path")
 	return cmd
 }
 

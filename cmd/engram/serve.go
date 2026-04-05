@@ -62,14 +62,6 @@ func daemonize(configPath, socketPath string) error {
 // daemonChildEnv is set on the child process to prevent re-daemonizing.
 const daemonChildEnv = "ENGRAM_DAEMON_CHILD"
 
-func defaultSocketPath() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "/tmp/engram.sock"
-	}
-	return filepath.Join(home, ".engram", "engram.sock")
-}
-
 func newServeCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "serve",
@@ -78,7 +70,7 @@ func newServeCmd() *cobra.Command {
 		RunE:  runServe,
 	}
 	cmd.Flags().String("config", "engram.yaml", "Path to configuration file")
-	cmd.Flags().String("socket", defaultSocketPath(), "Unix socket path for daemon")
+	cmd.Flags().String("socket", DefaultSocketPath(), "Unix socket path for daemon")
 	cmd.Flags().Bool("install-daemon", false, "Install as a system daemon (launchd/systemd)")
 	cmd.Flags().Bool("foreground", false, "Run in foreground instead of daemonizing")
 	return cmd
@@ -163,8 +155,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	slog.Info("engram daemon ready", "socket", socketPath)
 
-	home, _ := os.UserHomeDir()
-	sessionsDir := filepath.Join(home, ".engram", "sessions")
+	sessionsDir := DefaultSessionsDir()
 	proxySrv := proxy.New(cfg.Proxy.Port, cfg.Proxy.WindowSize, sessionsDir, "https://api.anthropic.com")
 	if err := proxySrv.Start(); err != nil {
 		return fmt.Errorf("start proxy on :%d: %w", cfg.Proxy.Port, err)

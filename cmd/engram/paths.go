@@ -18,7 +18,7 @@ func DefaultSocketPath() string {
 func DefaultConfigPath() string {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return "engram.yaml"
+		return "/tmp/engram.yaml"
 	}
 	return filepath.Join(home, ".engram", "engram.yaml")
 }
