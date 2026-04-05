@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pythondatascrape/engram/internal/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -188,4 +189,33 @@ func TestInstallPluginForOS_UnsupportedOS(t *testing.T) {
 		"/tmp/engram.sock")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unsupported")
+}
+
+func TestInstallCmd_ClaudeCode_EndToEnd_ServicePathsValid(t *testing.T) {
+	socketPath := DefaultSocketPath()
+	configPath := DefaultConfigPath()
+	binary := "/usr/local/bin/engram"
+
+	plist := generateLaunchdPlist(binary, configPath, socketPath)
+	assert.Contains(t, plist, binary, "plist must contain binary path")
+	assert.Contains(t, plist, configPath, "plist must contain config path")
+	assert.Contains(t, plist, socketPath, "plist must contain socket path")
+	assert.NotContains(t, plist, "<string></string>", "plist must not have empty args")
+
+	unit := generateSystemdUnit(binary, configPath, socketPath)
+	assert.Contains(t, unit, binary, "unit must contain binary path")
+	assert.Contains(t, unit, configPath, "unit must contain config path")
+	assert.Contains(t, unit, socketPath, "unit must contain socket path")
+}
+
+func TestInstallCmd_ClaudeCode_EndToEnd_ConfigCreated(t *testing.T) {
+	fakeHome := t.TempDir()
+	t.Setenv("HOME", fakeHome)
+
+	configPath := filepath.Join(fakeHome, ".engram", "engram.yaml")
+	require.NoError(t, config.EnsureDefault(configPath))
+	require.FileExists(t, configPath)
+
+	_, err := config.Load(configPath)
+	require.NoError(t, err)
 }
