@@ -14,6 +14,9 @@ type Handler struct {
 	sessionsDir string
 	upstream    string // e.g. "https://api.anthropic.com"
 	client      *http.Client
+	// afterStats is called after each WriteStats completes. Used in tests to
+	// avoid time.Sleep races; nil in production.
+	afterStats func()
 }
 
 // NewHandler creates a new Handler.
@@ -78,6 +81,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Write stats asynchronously after response.
 	go func() {
 		_ = WriteStats(h.sessionsDir, sessionID, ctxOrig, ctxComp)
+		if h.afterStats != nil {
+			h.afterStats()
+		}
 	}()
 }
 

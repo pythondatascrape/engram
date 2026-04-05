@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 )
 
 // fakeAnthropic returns a minimal non-streaming Anthropic response and
@@ -139,13 +138,13 @@ func TestXEngramSessionHeader(t *testing.T) {
 	defer srv.Close()
 
 	dir := t.TempDir()
+	done := make(chan struct{}, 1)
 	h := NewHandler(5, dir, srv.URL)
+	h.afterStats = func() { done <- struct{}{} }
 	postMessages(t, h, makeMessages(3), "sys", map[string]string{
 		"X-Engram-Session": "my-session-id",
 	})
-
-	// give goroutine time to write
-	time.Sleep(50 * time.Millisecond)
+	<-done
 
 	path := filepath.Join(dir, "my-session-id.json")
 	if _, err := os.Stat(path); err != nil {
@@ -159,10 +158,11 @@ func TestSystemPromptFingerprintFallback(t *testing.T) {
 	defer srv.Close()
 
 	dir := t.TempDir()
+	done := make(chan struct{}, 1)
 	h := NewHandler(5, dir, srv.URL)
+	h.afterStats = func() { done <- struct{}{} }
 	postMessages(t, h, makeMessages(3), "some text", nil)
-
-	time.Sleep(50 * time.Millisecond)
+	<-done
 
 	expectedID := SessionID("some text")
 	path := filepath.Join(dir, expectedID+".json")
@@ -177,12 +177,13 @@ func TestStatsWritten(t *testing.T) {
 	defer srv.Close()
 
 	dir := t.TempDir()
+	done := make(chan struct{}, 1)
 	h := NewHandler(5, dir, srv.URL)
+	h.afterStats = func() { done <- struct{}{} }
 	postMessages(t, h, makeMessages(10), "statstest", map[string]string{
 		"X-Engram-Session": "stats-session",
 	})
-
-	time.Sleep(50 * time.Millisecond)
+	<-done
 
 	data, err := os.ReadFile(filepath.Join(dir, "stats-session.json"))
 	if err != nil {
