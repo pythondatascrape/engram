@@ -142,6 +142,21 @@ server:
 	assert.Contains(t, err.Error(), "parse error")
 }
 
+func TestDefaults_ProxyConfig(t *testing.T) {
+	path := writeTempYAML(t, `
+server:
+  port: 9090
+`)
+	cfg, err := config.Load(path)
+	require.NoError(t, err)
+	if cfg.Proxy.Port != 4242 {
+		t.Errorf("expected default proxy port 4242, got %d", cfg.Proxy.Port)
+	}
+	if cfg.Proxy.WindowSize != 10 {
+		t.Errorf("expected default window size 10, got %d", cfg.Proxy.WindowSize)
+	}
+}
+
 func TestParseSize(t *testing.T) {
 	tests := []struct {
 		input    string

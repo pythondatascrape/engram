@@ -24,6 +24,7 @@ type Config struct {
 	Plugins   PluginConfig    `yaml:"plugins"`
 	Shutdown  ShutdownConfig  `yaml:"shutdown"`
 	Logging   LoggingConfig   `yaml:"logging"`
+	Proxy     ProxyConfig     `yaml:"proxy"`
 }
 
 type TLSConfig struct {
@@ -150,6 +151,11 @@ type LoggingConfig struct {
 	Output         string `yaml:"output"`
 	RedactIdentity bool   `yaml:"redact_identity"`
 	RedactQueries  bool   `yaml:"redact_queries"`
+}
+
+type ProxyConfig struct {
+	Port       int `yaml:"port"`
+	WindowSize int `yaml:"window_size"`
 }
 
 // Load reads the YAML file at path, applies defaults, applies env overrides,
@@ -292,6 +298,10 @@ func defaults() *Config {
 			Output:         "stdout",
 			RedactIdentity: true,
 			RedactQueries:  true,
+		},
+		Proxy: ProxyConfig{
+			Port:       4242,
+			WindowSize: 10,
 		},
 	}
 }
