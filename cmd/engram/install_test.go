@@ -3,9 +3,11 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"net"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -135,4 +137,46 @@ func TestInstallCmd_ClaudeCode_WritesStatusLine(t *testing.T) {
 
 	out := buf.String()
 	assert.Contains(t, out, "settings.json")
+}
+
+func TestVerifyReadiness_FailsWhenSocketMissing(t *testing.T) {
+	err := verifyReadiness("/nonexistent/engram.sock", 19999, 3*time.Second)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "socket")
+}
+
+func TestVerifyReadiness_FailsWhenPortNotListening(t *testing.T) {
+	// Create a real socket so the socket check passes.
+	sockPath := "/tmp/engram_test_sock_" + t.Name()
+	t.Cleanup(func() {
+		os.Remove(sockPath)
+	})
+	ln, err := net.Listen("unix", sockPath)
+	require.NoError(t, err)
+	defer ln.Close()
+
+	err = verifyReadiness(sockPath, 19998, 500*time.Millisecond)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "proxy")
+}
+
+func TestVerifyReadiness_SucceedsWhenBothAvailable(t *testing.T) {
+	sockPath := "/tmp/engram_test_sock_" + t.Name()
+	t.Cleanup(func() {
+		os.Remove(sockPath)
+	})
+
+	// Socket listener
+	ln, err := net.Listen("unix", sockPath)
+	require.NoError(t, err)
+	defer ln.Close()
+
+	// TCP listener on a free port
+	tcpLn, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	defer tcpLn.Close()
+	port := tcpLn.Addr().(*net.TCPAddr).Port
+
+	err = verifyReadiness(sockPath, port, time.Second)
+	require.NoError(t, err)
 }
