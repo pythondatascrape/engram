@@ -3,6 +3,7 @@ package install
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 )
@@ -37,5 +38,6 @@ func MergeClaudeSettings(settingsPath, cmd string) error {
 		return fmt.Errorf("create settings dir: %w", err)
 	}
 
+	slog.Info("merged claude settings", "path", settingsPath)
 	return os.WriteFile(settingsPath, append(out, '\n'), 0o644)
 }

@@ -22,7 +22,8 @@ func TestMergeClaudeSettings_CreatesFileWhenMissing(t *testing.T) {
 	var got map[string]any
 	require.NoError(t, json.Unmarshal(data, &got))
 
-	sl := got["statusLine"].(map[string]any)
+	sl, ok := got["statusLine"].(map[string]any)
+	require.True(t, ok, "statusLine should be a map[string]any")
 	assert.Equal(t, "command", sl["type"])
 	assert.Equal(t, "engram statusline", sl["command"])
 }
@@ -40,7 +41,8 @@ func TestMergeClaudeSettings_PreservesExistingKeys(t *testing.T) {
 	var got map[string]any
 	require.NoError(t, json.Unmarshal(data, &got))
 
-	env := got["env"].(map[string]any)
+	env, ok := got["env"].(map[string]any)
+	require.True(t, ok, "env should be a map[string]any")
 	assert.Equal(t, "bar", env["FOO"])
 	assert.NotNil(t, got["statusLine"])
 }
@@ -58,7 +60,9 @@ func TestMergeClaudeSettings_OverwritesExistingStatusLine(t *testing.T) {
 	var got map[string]any
 	require.NoError(t, json.Unmarshal(data, &got))
 
-	sl := got["statusLine"].(map[string]any)
+	sl, ok := got["statusLine"].(map[string]any)
+	require.True(t, ok, "statusLine should be a map[string]any")
+	assert.Equal(t, "command", sl["type"])
 	assert.Equal(t, "engram statusline", sl["command"])
 }
 
