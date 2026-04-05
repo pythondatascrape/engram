@@ -109,9 +109,10 @@ func (h *Handler) forwardWithBody(w http.ResponseWriter, r *http.Request, body [
 		return
 	}
 
-	// Copy headers from original request, skip Content-Length (we set it ourselves).
+	// Copy headers from original request, skip Content-Length (we set it ourselves)
+	// and X-Engram-Session (internal routing header, not for Anthropic).
 	for k, vs := range r.Header {
-		if k == "Content-Length" {
+		if k == "Content-Length" || k == "X-Engram-Session" {
 			continue
 		}
 		for _, v := range vs {

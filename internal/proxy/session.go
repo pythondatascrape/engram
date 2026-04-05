@@ -30,6 +30,10 @@ func WriteStats(sessionsDir, sessionID string, ctxOrig, ctxComp int) error {
 	mu.Lock()
 	defer mu.Unlock()
 
+	if err := os.MkdirAll(sessionsDir, 0o700); err != nil {
+		return fmt.Errorf("create sessions dir: %w", err)
+	}
+
 	path := filepath.Join(sessionsDir, sessionID+".json")
 
 	existing := make(map[string]any)

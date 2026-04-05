@@ -83,6 +83,10 @@ func MergeProxySettings(settingsPath string, port int) error {
 			rh[k] = v
 		}
 	}
+	// NOTE: Claude Code does not interpolate ${session_id} — this sends the
+	// literal string. The proxy falls back to system-prompt fingerprinting when
+	// the header value is not a real session ID. Kept for future compatibility
+	// if Claude Code adds variable interpolation in requestHeaders.
 	rh["X-Engram-Session"] = "${session_id}"
 	settings["requestHeaders"] = rh
 
