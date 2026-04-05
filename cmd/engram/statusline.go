@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	"github.com/pythondatascrape/engram/internal/optimizer"
+	"github.com/pythondatascrape/engram/internal/updater"
 	"github.com/spf13/cobra"
 )
 
@@ -63,6 +64,11 @@ token accounting from live sessions. Otherwise, static estimates are shown.`,
 			}
 
 			optimizer.FormatStatusline(os.Stdout, data)
+
+			if v := updater.ReadAvailableUpdate(); v != "" {
+				fmt.Fprintf(os.Stdout, "update %s available — run: engram update\n", v)
+			}
+
 			return nil
 		},
 	}

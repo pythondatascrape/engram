@@ -120,8 +120,8 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	slog.Info("starting engram daemon", "socket", socketPath, "config", configPath)
 
-	// Check for updates in the background; applies and restarts if found.
-	go updater.CheckAndApply(Version)
+	// Check for updates in the background; writes ~/.engram/.update-available if found.
+	go updater.CheckAndNotify(Version)
 
 	// Initialize components.
 	_ = registry.New()

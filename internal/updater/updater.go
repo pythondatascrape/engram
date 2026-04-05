@@ -32,6 +32,65 @@ type asset struct {
 	BrowserDownloadURL string `json:"browser_download_url"`
 }
 
+const updateAvailableFile = ".update-available"
+
+// CheckAndNotify fetches the latest GitHub release. If it is newer than
+// current, it writes ~/.engram/.update-available with the new version tag so
+// that `engram statusline` can surface an indicator. Safe to call in a goroutine.
+func CheckAndNotify(current string) {
+	if !cooldownElapsed() {
+		slog.Debug("updater: skipping check, within cooldown window")
+		return
+	}
+	stampCheckTime()
+
+	rel, err := fetchLatest()
+	if err != nil {
+		slog.Debug("updater: fetch failed", "error", err)
+		return
+	}
+
+	if !isNewer(current, rel.TagName) {
+		slog.Debug("updater: already up to date", "version", current)
+		clearNotify()
+		return
+	}
+
+	slog.Info("updater: new version available", "current", current, "latest", rel.TagName)
+	writeNotify(rel.TagName)
+}
+
+func writeNotify(version string) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return
+	}
+	path := filepath.Join(home, ".engram", updateAvailableFile)
+	_ = os.WriteFile(path, []byte(version), 0o600)
+}
+
+func clearNotify() {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return
+	}
+	_ = os.Remove(filepath.Join(home, ".engram", updateAvailableFile))
+}
+
+// ReadAvailableUpdate returns the latest version tag if an update is available,
+// or an empty string if the installation is current.
+func ReadAvailableUpdate() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	data, err := os.ReadFile(filepath.Join(home, ".engram", updateAvailableFile))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
+}
+
 // CheckAndApply fetches the latest GitHub release. If it is newer than
 // current, the binary is replaced in-place and the process exits so the
 // supervisor (launchd/systemd) can restart it. Safe to call in a goroutine.
