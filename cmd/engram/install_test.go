@@ -149,7 +149,8 @@ func TestVerifyReadiness_FailsWhenSocketMissing(t *testing.T) {
 
 func TestVerifyReadiness_FailsWhenPortNotListening(t *testing.T) {
 	// Create a real socket so the socket check passes.
-	sockPath := "/tmp/engram_test_sock_" + t.Name()
+	// Use a short path to stay under the 104-char Unix socket limit.
+	sockPath := filepath.Join("/tmp", "e_"+t.Name()+".sock")
 	t.Cleanup(func() {
 		os.Remove(sockPath)
 	})
@@ -163,7 +164,8 @@ func TestVerifyReadiness_FailsWhenPortNotListening(t *testing.T) {
 }
 
 func TestVerifyReadiness_SucceedsWhenBothAvailable(t *testing.T) {
-	sockPath := "/tmp/engram_test_sock_" + t.Name()
+	// Use a short path to stay under the 104-char Unix socket limit.
+	sockPath := filepath.Join("/tmp", "e_"+t.Name()+".sock")
 	t.Cleanup(func() {
 		os.Remove(sockPath)
 	})
