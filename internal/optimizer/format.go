@@ -124,7 +124,16 @@ func FormatStatuslineSideBySide(w io.Writer, d StatuslineData, ctx ContextData) 
 		ctxOrig = 1
 	}
 	ctxSaved := ctxOrig - ctx.Comp
-	ctxSavePct := percent(ctxSaved, ctxOrig)
+
+	// Compute percentage from K-rounded values so it's visually consistent
+	// with the displayed numbers. Raw values can differ from their K display
+	// (e.g. 4800 rounds to 5K), which would make the % appear wrong.
+	ctxOrigK := (ctxOrig + 500) / 1000
+	ctxCompK := (ctx.Comp + 500) / 1000
+	var ctxSavePct int
+	if ctxOrigK > 0 {
+		ctxSavePct = ((ctxOrigK - ctxCompK) * 100) / ctxOrigK
+	}
 
 	// Build left-column rows as strings so we can pad them to equal visual
 	// width before appending the right column. The saved row is always the
