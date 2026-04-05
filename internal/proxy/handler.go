@@ -12,6 +12,13 @@ import (
 // Claude Code to the proxy. Stripped before forwarding to Anthropic.
 const engramSessionHeader = "X-Engram-Session"
 
+// isPlaceholder reports whether s is an unresolved template variable
+// (e.g. "${session_id}" as written by engram install into Claude Code settings).
+// These values are not real session IDs and must fall back to fingerprinting.
+func isPlaceholder(s string) bool {
+	return len(s) > 3 && s[0] == '$' && s[1] == '{' && s[len(s)-1] == '}'
+}
+
 // Handler implements http.Handler for the Anthropic-compatible proxy.
 type Handler struct {
 	windowSize  int
@@ -64,7 +71,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Determine session ID.
 	sessionID := r.Header.Get(engramSessionHeader)
-	if sessionID == "" {
+	if sessionID == "" || isPlaceholder(sessionID) {
 		sessionID = SessionID(req.System)
 	}
 

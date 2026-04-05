@@ -223,3 +223,32 @@ func TestMalformedJSONFailOpen(t *testing.T) {
 		t.Fatalf("expected verbatim body forwarded, got: %q", string(*received))
 	}
 }
+
+// TestPlaceholderSessionIDFallsBackToFingerprint verifies that the literal
+// "${session_id}" written by engram install is not used as a real session ID.
+func TestPlaceholderSessionIDFallsBackToFingerprint(t *testing.T) {
+	srv, _ := fakeAnthropic(t)
+	defer srv.Close()
+
+	dir := t.TempDir()
+	done := make(chan struct{}, 1)
+	h := NewHandler(5, dir, srv.URL)
+	h.afterStats = func() { done <- struct{}{} }
+
+	// Send with the literal placeholder that engram install writes.
+	postMessages(t, h, makeMessages(3), "my-system-prompt", map[string]string{
+		"X-Engram-Session": "${session_id}",
+	})
+	<-done
+
+	// The stats file must be named after the fingerprint of the system prompt,
+	// NOT the literal string "${session_id}".
+	expected := SessionID("my-system-prompt")
+	if _, err := os.Stat(filepath.Join(dir, expected+".json")); err != nil {
+		t.Fatalf("expected fingerprint file %s.json, got: %v", expected, err)
+	}
+	// Also assert the placeholder file was NOT created.
+	if _, err := os.Stat(filepath.Join(dir, "${session_id}.json")); err == nil {
+		t.Fatal("placeholder file ${session_id}.json should not have been created")
+	}
+}
