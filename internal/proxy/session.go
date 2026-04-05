@@ -10,7 +10,9 @@ import (
 	"sync"
 )
 
-// mu protects concurrent writes to the same session file.
+// mu serializes all session file writes. A single global mutex is intentional:
+// this is single-user local software and per-file mutexes add complexity without
+// meaningful throughput benefit.
 var mu sync.Mutex
 
 // SessionID derives a stable proxy session ID from the system prompt content.
@@ -32,7 +34,7 @@ func WriteStats(sessionsDir, sessionID string, ctxOrig, ctxComp int) error {
 
 	existing := make(map[string]any)
 	if data, err := os.ReadFile(path); err == nil {
-		_ = json.Unmarshal(data, &existing)
+		_ = json.Unmarshal(data, &existing) // ignore: treat corrupt/partial file as empty
 	}
 
 	existing["ctx_orig"] = ctxOrig
