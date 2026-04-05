@@ -162,6 +162,175 @@ See the [Travelbound demo project](https://github.com/pythondatascrape/travelbou
 - [Integration Guide](docs/integration-guide.md) — Configure Claude Code, OpenClaw, and SDK setup
 - [Changelog](CHANGELOG.md) — Release history
 
+## Best Use
+
+Engram's identity compression is only as good as the codebook it works from. A well-structured codebook can reduce identity context from thousands of tokens to a handful of key=value pairs. This section shows how to maximize that savings — and how to wire it into your LLM calls.
+
+### Why This Matters
+
+Every LLM call re-sends your identity: who you are, what you prefer, how you work. Written as prose, that identity is verbose by design — natural language is redundant. Engram replaces prose with a derived codebook so the same information travels in a fraction of the tokens.
+
+| Format | Example | ~Tokens |
+|--------|---------|---------|
+| Plain prose | `"I prefer concise responses without summaries. I'm a senior Go engineer who has been writing Go for ten years. I'm working on a CLI tool targeting macOS and Linux."` | ~45 |
+| Codebook (key=value) | `role=engineer lang=go exp=10y platform=macos,linux style=concise no_summaries=true` | ~14 |
+| **Savings** | | **~69%** |
+
+At scale — a full CLAUDE.md, system prompt, and project instructions — this compression reaches **96–98%**. That headroom goes directly toward more productive context: longer conversation history, bigger diffs, more tool results.
+
+### How Codebooks Work
+
+Engram's `derive_codebook` MCP tool scans your CLAUDE.md and project instructions, extracts structured dimensions, and produces a compact codebook. On the first turn, the codebook definition is sent once so the model understands the format. Every subsequent turn references keys only.
+
+```
+# First turn — definition sent once
+codebook: role(enum:engineer,researcher) lang(text) style(enum:concise,verbose) no_summaries(bool)
+
+# All subsequent turns — keys only
+role=engineer lang=go style=concise no_summaries=true
+```
+
+You can also define codebooks manually in YAML for domain-specific applications:
+
+```yaml
+# ~/.engram-codebook.yaml
+name: my-project
+version: 1
+dimensions:
+  - name: role
+    type: enum
+    values: [engineer, researcher, designer]
+    required: true
+
+  - name: lang
+    type: text
+    required: true
+
+  - name: style
+    type: enum
+    values: [concise, verbose]
+    required: false
+
+  - name: no_summaries
+    type: boolean
+    required: false
+```
+
+Pass the override path to `derive_codebook` and it merges your explicit dimensions with anything auto-detected:
+
+```python
+result = await client.compress({
+    "identity": open("CLAUDE.md").read(),
+    "yamlOverridePath": ".engram-codebook.yaml",
+    ...
+})
+```
+
+### Maximizing Your Codebook
+
+**1. Make dimensions specific and bounded.** Enum and boolean fields compress best — they map to a single token. Free-text fields still compress, but less aggressively.
+
+```yaml
+# Good — bounded enum
+- name: experience
+  type: enum
+  values: [junior, mid, senior, staff]
+
+# Less efficient — open text
+- name: experience
+  type: text
+```
+
+**2. Prefer `required: true` for your most-repeated attributes.** Required dimensions are always included in the serialized output and always stripped from subsequent prose. Optional ones are only emitted when set.
+
+**3. Use `check_redundancy` before sending responses.** The MCP tool flags prose that re-states what the codebook already encodes, so you can strip it before it enters context.
+
+```python
+# In a PostToolUse hook or response filter
+check = await mcp.check_redundancy(content=llm_response)
+if check["redundant"]:
+    llm_response = check["stripped"]  # codebook entries removed
+```
+
+**4. Run `engram analyze` after your first session.** It reads session data and suggests dimensions you haven't captured yet — common repeated phrases that are good codebook candidates.
+
+```bash
+engram analyze
+# → Suggested dimensions: deadline_pressure (bool), test_style (enum: tdd,bdd,none)
+```
+
+### Updating LLM Calls to Use Engram
+
+For transparent proxy use (Claude Code, OpenClaw), no code changes are needed — all calls route through Engram automatically after `engram install`.
+
+For SDK use, replace the direct Anthropic/OpenAI base URL with the local proxy:
+
+**Before:**
+```python
+import anthropic
+client = anthropic.Anthropic(api_key="...")
+
+response = client.messages.create(
+    model="claude-sonnet-4-6",
+    system="You are a concise senior Go engineer. I prefer no trailing summaries. "
+           "I'm working on a macOS/Linux CLI. My style preference is direct and brief...",
+    messages=[{"role": "user", "content": "..."}]
+)
+```
+
+**After (proxy):**
+```python
+import anthropic
+import httpx
+
+# Route through Engram's local proxy — compression is transparent
+client = anthropic.Anthropic(
+    api_key="...",
+    http_client=httpx.Client(proxies="http://localhost:4242")
+)
+
+# Same call — Engram compresses identity and context before forwarding
+response = client.messages.create(
+    model="claude-sonnet-4-6",
+    system="You are a concise senior Go engineer...",  # compressed automatically
+    messages=[{"role": "user", "content": "..."}]
+)
+```
+
+**After (MCP tools, explicit):**
+```python
+from engram import Engram
+
+async with await Engram.connect() as client:
+    # Derive codebook from your identity text once per session
+    codebook = await client.derive_codebook(content=open("CLAUDE.md").read())
+
+    # Compress identity — use the returned block as your system prompt prefix
+    compressed = await client.compress_identity()
+    # compressed["block"] → "role=engineer lang=go style=concise no_summaries=true"
+
+    response = anthropic_client.messages.create(
+        model="claude-sonnet-4-6",
+        system=compressed["block"],  # ~14 tokens instead of ~450
+        messages=[{"role": "user", "content": "..."}]
+    )
+```
+
+### Plain-Text vs. Structured Context: A Comparison
+
+| Attribute | Plain-Text CLAUDE.md | Engram Codebook |
+|-----------|---------------------|-----------------|
+| Format | Natural language prose | `key=value` pairs |
+| Tokens (typical) | 300–800 | 10–30 |
+| Sent every turn | Yes | Keys only (definition sent once) |
+| LLM interpretability | High (verbose) | High (structured, unambiguous) |
+| Redundancy detection | None | `check_redundancy` strips re-stated values |
+| Manual tuning | Edit CLAUDE.md | Edit `.engram-codebook.yaml` |
+| Auto-derived | — | `derive_codebook` extracts from CLAUDE.md |
+| Identity compression | — | **~96–98%** |
+
+The key insight: plain-text identity is high-fidelity but pays a large per-turn token tax. A codebook pays a one-time definition cost and then transmits identity in a handful of tokens for every turn that follows. On a 50-turn session, a 400-token identity compressed to 15 tokens saves ~19,000 tokens — roughly equivalent to adding 15 pages of usable context back to your window.
+
 ## License
 
 Apache 2.0 — see [LICENSE](LICENSE).
