@@ -22,7 +22,10 @@ function setupProject(home) {
 }
 
 async function runHook(payload, fakeHome, projectDir) {
-  // Override HOME and CLAUDE_PROJECT_DIR for the duration of this call.
+  // Isolation relies on homedir() being called inside run() at invocation time,
+  // not at module load time. The ?bust param prevents the module from being
+  // shared across test files in the same process, but HOME isolation works
+  // because homedir() reads process.env.HOME lazily on each call.
   const origHome = process.env.HOME;
   const origDir  = process.env.CLAUDE_PROJECT_DIR;
   process.env.HOME = fakeHome;
