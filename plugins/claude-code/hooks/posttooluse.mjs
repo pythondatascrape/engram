@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { createInterface } from 'readline';
+import { DaemonClient } from '../lib/daemon-client.mjs';
 
 const MIN_CHARS_TO_CHECK = 800; // ~200 tokens at ~4 chars/token
 const OWN_TOOL_PREFIX = 'mcp__engram-ccode';
@@ -14,34 +15,35 @@ async function readStdin() {
   });
 }
 
-async function main() {
+/**
+ * Core hook logic. Injectable for testing:
+ *   clientFactory() returns a DaemonClient-compatible object.
+ *   stdinFn() returns the raw stdin string.
+ */
+export async function run(clientFactory = () => new DaemonClient(), stdinFn = readStdin) {
+  const raw = await stdinFn();
+  if (!raw.trim()) return;
+
+  let payload;
+  try { payload = JSON.parse(raw); } catch { return; }
+
+  const toolName = typeof payload.tool_name === 'string' ? payload.tool_name : '';
+  const toolOutput = typeof payload.tool_output === 'string' ? payload.tool_output : '';
+
+  if (toolName.startsWith(OWN_TOOL_PREFIX)) return;
+  if (!toolOutput || toolOutput.length < MIN_CHARS_TO_CHECK) return;
+
+  const client = clientFactory();
   try {
-    const raw = await readStdin();
-    if (!raw.trim()) process.exit(0);
-
-    let payload;
-    try {
-      payload = JSON.parse(raw);
-    } catch {
-      process.exit(0);
-    }
-
-    const toolName = typeof payload.tool_name === 'string' ? payload.tool_name : '';
-    const toolOutput = typeof payload.tool_output === 'string' ? payload.tool_output : '';
-
-    if (toolName.startsWith(OWN_TOOL_PREFIX)) process.exit(0);
-    if (!toolOutput || toolOutput.length < MIN_CHARS_TO_CHECK) process.exit(0);
-
-    const estimatedTokens = Math.ceil(toolOutput.length / 4);
-
-    const message = {
-      message: `Tool output detected (~${estimatedTokens} tokens) from "${toolName || 'unknown'}". Consider running mcp__engram-ccode__check_redundancy to detect repeated identity context.`,
-    };
-
-    process.stdout.write(JSON.stringify(message) + '\n');
+    await client.call('engram.checkRedundancy', { content: toolOutput });
   } catch {
-    process.exit(0);
+    // Daemon may not be running — fail silently, never surface to Claude
+  } finally {
+    client.disconnect();
   }
 }
 
-main();
+// Run only when executed directly as a hook, not when imported by tests.
+if (new URL(import.meta.url).pathname === process.argv[1]) {
+  run().then(() => process.exit(0)).catch(() => process.exit(0));
+}
