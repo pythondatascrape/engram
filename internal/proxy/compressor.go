@@ -7,7 +7,8 @@ import (
 )
 
 // AnthropicMessage is the wire format for a single message in the Anthropic API.
-// Content is string for simple text, or []map[string]any for structured content blocks.
+// Content is string for simple text, or []interface{} for structured content blocks
+// (tool use, images). json.Unmarshal decodes JSON arrays into []interface{}, not []map[string]any.
 type AnthropicMessage struct {
 	Role    string `json:"role"`
 	Content any    `json:"content"`
@@ -47,8 +48,8 @@ func compressHead(msgs []AnthropicMessage) string {
 	parts := make([]string, len(msgs))
 	for i, m := range msgs {
 		text := messageText(m)
-		if len(text) > 120 {
-			text = text[:120]
+		if runes := []rune(text); len(runes) > 120 {
+			text = string(runes[:120])
 		}
 		parts[i] = m.Role + ": " + text
 	}
@@ -61,7 +62,10 @@ func messageText(m AnthropicMessage) string {
 	case string:
 		return v
 	default:
-		b, _ := json.Marshal(v)
+		b, err := json.Marshal(v)
+		if err != nil {
+			return "<unmarshalable content>"
+		}
 		return string(b)
 	}
 }
