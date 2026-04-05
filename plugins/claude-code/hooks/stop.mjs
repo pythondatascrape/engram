@@ -104,14 +104,6 @@ export async function run(stdinFn = readStdin) {
   stats.total_comp  = stats.comp_per_call  * stats.turns;
   stats.total_saved = stats.saved_per_call * stats.turns;
 
-  // Context window tracking: record what the context would have been without
-  // Engram (baseline = actual + identity savings this turn) vs what it is with Engram.
-  const totalInputTokens = payload.context_window?.total_input_tokens;
-  if (typeof totalInputTokens === 'number' && totalInputTokens > 0) {
-    stats.ctx_comp = totalInputTokens;
-    stats.ctx_orig = totalInputTokens + stats.total_saved;
-  }
-
   const tmp = `${sessionFile}.tmp`;
   writeFileSync(tmp, JSON.stringify(stats, null, 2) + '\n', { mode: 0o600 });
   // Atomic rename so partial writes never corrupt the file.
