@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -169,9 +168,9 @@ func runServe(cmd *cobra.Command, args []string) error {
 	sessionsDir := filepath.Join(home, ".engram", "sessions")
 	proxySrv := proxy.New(cfg.Proxy.Port, cfg.Proxy.WindowSize, sessionsDir, "https://api.anthropic.com")
 	if err := proxySrv.Start(); err != nil {
-		log.Printf("warn: proxy could not start on :%d: %v", cfg.Proxy.Port, err)
+		slog.Warn("proxy could not start", "port", cfg.Proxy.Port, "err", err)
 	} else {
-		log.Printf("proxy listening on :%d", cfg.Proxy.Port)
+		slog.Info("proxy listening", "port", cfg.Proxy.Port)
 	}
 
 	// Wait for shutdown signal.
