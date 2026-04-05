@@ -2,10 +2,12 @@ package main
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"runtime"
 
+	"github.com/pythondatascrape/engram/internal/config"
 	"github.com/pythondatascrape/engram/internal/install"
 	"github.com/spf13/cobra"
 )
@@ -85,6 +87,19 @@ the engram compression plugin. Use flags to target a specific client.`,
 					}
 					fmt.Fprintf(cmd.OutOrStdout(), "  Claude Code plugin installed to ~/.claude/plugins/cache/engram/engram/%s/\n", pluginVersion)
 					fmt.Fprintln(cmd.OutOrStdout(), "  Statusline registered in ~/.claude/settings.json")
+
+					// Configure proxy headers. Load port from config; fall back to default.
+					proxyPort := config.DefaultProxyPort
+					if configPath, err := cmd.Root().PersistentFlags().GetString("config"); err == nil {
+						if cfg, err := config.Load(configPath); err == nil {
+							proxyPort = cfg.Proxy.Port
+						}
+					}
+					if err := install.RegisterProxyHeaders("", proxyPort); err != nil {
+						slog.Warn("proxy headers not configured", "err", err)
+					} else {
+						fmt.Fprintf(cmd.OutOrStdout(), "  Proxy headers registered in ~/.claude/settings.json (port %d)\n", proxyPort)
+					}
 					if runtime.GOOS == "darwin" {
 						home, homeErr := os.UserHomeDir()
 						binary, binErr := os.Executable()

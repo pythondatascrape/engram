@@ -39,6 +39,21 @@ func RegisterClaudeCodeWithStatusline(sourceDir, version, settingsPath string) e
 	return MergeClaudeSettings(settingsPath, "engram statusline")
 }
 
+// RegisterProxyHeaders configures the Claude Code settings file at settingsPath
+// to route API traffic through the engram proxy on the given port.
+// settingsPath defaults to ~/.claude/settings.json when empty.
+// It delegates to MergeProxySettings.
+func RegisterProxyHeaders(settingsPath string, port int) error {
+	if settingsPath == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return fmt.Errorf("cannot determine home directory: %w", err)
+		}
+		settingsPath = filepath.Join(home, ".claude", "settings.json")
+	}
+	return MergeProxySettings(settingsPath, port)
+}
+
 // registerPlugin copies sourceDir into <home>/<pathElems...>/<version>/, removing any
 // previous installation first. os.RemoveAll is a no-op when the target does not exist.
 func registerPlugin(sourceDir, version string, pathElems ...string) error {

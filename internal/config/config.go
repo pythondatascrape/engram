@@ -320,6 +320,9 @@ func applyEnvOverrides(cfg *Config) {
 	}
 }
 
+// DefaultProxyPort is the proxy port used when no config file is available.
+const DefaultProxyPort = 4242
+
 const minMemoryCeilingBytes = 128 * 1024 * 1024 // 128 MB
 
 func validate(cfg *Config) error {

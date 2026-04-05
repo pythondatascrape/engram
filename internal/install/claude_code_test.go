@@ -130,6 +130,26 @@ func TestRegisterClaudeCodeWithStatusline_PreservesExistingSettings(t *testing.T
 	assert.NotNil(t, got["statusLine"])
 }
 
+func TestRegisterProxyHeaders_WritesSettings(t *testing.T) {
+	fakeHome := t.TempDir()
+	t.Setenv("HOME", fakeHome)
+
+	settingsPath := filepath.Join(fakeHome, "settings.json")
+
+	err := RegisterProxyHeaders(settingsPath, 4242)
+	require.NoError(t, err)
+
+	data, err := os.ReadFile(settingsPath)
+	require.NoError(t, err)
+
+	var got map[string]any
+	require.NoError(t, json.Unmarshal(data, &got))
+
+	env, ok := got["env"].(map[string]any)
+	require.True(t, ok, "env should be a map[string]any")
+	assert.Equal(t, "http://localhost:4242", env["ANTHROPIC_BASE_URL"])
+}
+
 func TestRegisterClaudeCodeWithStatusline_DefaultsSettingsPath(t *testing.T) {
 	src := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(src, "server.mjs"), []byte("// plugin"), 0o644))
