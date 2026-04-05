@@ -153,6 +153,38 @@ server:
 	assert.Equal(t, 10, cfg.Proxy.WindowSize, "default window size")
 }
 
+func TestEnsureDefault_CreatesWhenMissing(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "engram.yaml")
+
+	err := config.EnsureDefault(path)
+	require.NoError(t, err)
+	require.FileExists(t, path)
+}
+
+func TestEnsureDefault_LoadsSuccessfully(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "engram.yaml")
+
+	require.NoError(t, config.EnsureDefault(path))
+	_, err := config.Load(path)
+	require.NoError(t, err)
+}
+
+func TestEnsureDefault_PreservesExisting(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "engram.yaml")
+
+	original := "# custom config\nserver:\n  port: 9999\n"
+	require.NoError(t, os.WriteFile(path, []byte(original), 0644))
+
+	require.NoError(t, config.EnsureDefault(path))
+
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	require.Equal(t, original, string(data))
+}
+
 func TestParseSize(t *testing.T) {
 	tests := []struct {
 		input    string
