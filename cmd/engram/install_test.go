@@ -188,7 +188,8 @@ func TestVerifyReadiness_SucceedsWhenBothAvailable(t *testing.T) {
 func TestInstallPluginForOS_UnsupportedOS(t *testing.T) {
 	err := installPluginForOS("windows", "/bin/engram",
 		"/tmp/engram.yaml",
-		"/tmp/engram.sock")
+		"/tmp/engram.sock",
+		config.DefaultProxyPort)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unsupported")
 }

@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -16,9 +15,9 @@ import (
 const pluginVersion = "0.2.1"
 
 // installPluginForOS installs the background service for the given GOOS value,
-// then verifies the daemon is reachable. Returns an error for unsupported OSes
-// or if any step fails.
-func installPluginForOS(goos, binary, configPath, socketPath string) error {
+// then verifies the daemon is reachable on proxyPort. Returns an error for
+// unsupported OSes or if any step fails.
+func installPluginForOS(goos, binary, configPath, socketPath string, proxyPort int) error {
 	switch goos {
 	case "darwin":
 		if err := installLaunchd(binary, configPath, socketPath); err != nil {
@@ -31,7 +30,7 @@ func installPluginForOS(goos, binary, configPath, socketPath string) error {
 	default:
 		return fmt.Errorf("daemon service install: unsupported OS %q — run `engram serve` manually", goos)
 	}
-	if err := verifyReadiness(socketPath, config.DefaultProxyPort, 15*time.Second); err != nil {
+	if err := verifyReadiness(socketPath, proxyPort, 15*time.Second); err != nil {
 		return fmt.Errorf("post-install readiness check failed: %w", err)
 	}
 	return nil
@@ -111,33 +110,32 @@ the engram compression plugin. Use flags to target a specific client.`,
 					fmt.Fprintf(cmd.OutOrStdout(), "  Claude Code plugin installed to ~/.claude/plugins/cache/engram/engram/%s/\n", pluginVersion)
 					fmt.Fprintln(cmd.OutOrStdout(), "  Statusline registered in ~/.claude/settings.json")
 
-					// Configure proxy headers. Load port from config; fall back to default.
-					proxyPort := config.DefaultProxyPort
-					if configPath, err := cmd.Root().PersistentFlags().GetString("config"); err == nil {
-						if cfg, err := config.Load(configPath); err == nil {
-							proxyPort = cfg.Proxy.Port
-						}
-					}
-					if err := install.RegisterProxyHeaders("", proxyPort); err != nil {
-						slog.Warn("proxy headers not configured", "err", err)
-					} else {
-						fmt.Fprintf(cmd.OutOrStdout(), "  Proxy headers registered in ~/.claude/settings.json (port %d)\n", proxyPort)
-					}
-
-					// Ensure config exists.
+					// Ensure config exists before reading proxy port from it.
 					configFilePath := DefaultConfigPath()
 					if err := config.EnsureDefault(configFilePath); err != nil {
 						return fmt.Errorf("create default config: %w", err)
 					}
 					fmt.Fprintf(cmd.OutOrStdout(), "  Config ready at %s\n", configFilePath)
 
-					// Install and start background service.
+					// Read the actual proxy port from the config we just ensured exists.
+					proxyPort := config.DefaultProxyPort
+					if cfg, err := config.Load(configFilePath); err == nil {
+						proxyPort = cfg.Proxy.Port
+					}
+
+					// Register proxy headers — required for Claude to route through Engram.
+					if err := install.RegisterProxyHeaders("", proxyPort); err != nil {
+						return fmt.Errorf("register proxy headers: %w", err)
+					}
+					fmt.Fprintf(cmd.OutOrStdout(), "  Proxy headers registered in ~/.claude/settings.json (port %d)\n", proxyPort)
+
+					// Install and start background service, verifying readiness on the same port.
 					socketFilePath := DefaultSocketPath()
 					binary, binErr := os.Executable()
 					if binErr != nil {
 						return fmt.Errorf("daemon service install: resolve binary: %w", binErr)
 					}
-					if err := installPluginForOS(runtime.GOOS, binary, configFilePath, socketFilePath); err != nil {
+					if err := installPluginForOS(runtime.GOOS, binary, configFilePath, socketFilePath, proxyPort); err != nil {
 						return fmt.Errorf("install Claude Code daemon: %w", err)
 					}
 					fmt.Fprintln(cmd.OutOrStdout(), "  Daemon installed and running")

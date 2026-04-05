@@ -69,7 +69,7 @@ func newServeCmd() *cobra.Command {
 		Long:  "Start the Engram daemon process, listening on a Unix socket\nfor JSON-RPC requests from CLI clients.\n\nBy default, engram daemonizes itself and returns immediately.\nUse --foreground to keep it attached to the terminal.",
 		RunE:  runServe,
 	}
-	cmd.Flags().String("config", "engram.yaml", "Path to configuration file")
+	cmd.Flags().String("config", DefaultConfigPath(), "Path to configuration file")
 	cmd.Flags().String("socket", DefaultSocketPath(), "Unix socket path for daemon")
 	cmd.Flags().Bool("install-daemon", false, "Install as a system daemon (launchd/systemd)")
 	cmd.Flags().Bool("foreground", false, "Run in foreground instead of daemonizing")
