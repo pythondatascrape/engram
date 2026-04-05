@@ -1,0 +1,52 @@
+// internal/proxy/session.go
+package proxy
+
+import (
+	"crypto/sha256"
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"sync"
+)
+
+// mu protects concurrent writes to the same session file.
+var mu sync.Mutex
+
+// SessionID derives a stable proxy session ID from the system prompt content.
+// Uses first 8 bytes of SHA-256 so IDs are short but collision-resistant enough
+// for single-user local use.
+func SessionID(systemPrompt string) string {
+	h := sha256.Sum256([]byte(systemPrompt))
+	return fmt.Sprintf("proxy-%x", h[:8])
+}
+
+// WriteStats merges ctx_orig and ctx_comp into the session file at
+// sessionsDir/<sessionID>.json. Preserves all existing fields (e.g. stop-hook stats).
+// Writes are atomic via tmp+rename.
+func WriteStats(sessionsDir, sessionID string, ctxOrig, ctxComp int) error {
+	mu.Lock()
+	defer mu.Unlock()
+
+	path := filepath.Join(sessionsDir, sessionID+".json")
+
+	existing := make(map[string]any)
+	if data, err := os.ReadFile(path); err == nil {
+		_ = json.Unmarshal(data, &existing)
+	}
+
+	existing["ctx_orig"] = ctxOrig
+	existing["ctx_comp"] = ctxComp
+
+	data, err := json.MarshalIndent(existing, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal session stats: %w", err)
+	}
+	data = append(data, '\n')
+
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+		return fmt.Errorf("write tmp session file: %w", err)
+	}
+	return os.Rename(tmp, path)
+}
