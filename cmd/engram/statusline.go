@@ -59,7 +59,29 @@ stdin automatically so each terminal session shows its own stats.`,
 			// This ensures multiple concurrent sessions never cross-contaminate.
 			if sessionID != "" {
 				home, _ := os.UserHomeDir()
-				sessFile := filepath.Join(home, ".engram", "sessions", sessionID+".json")
+				sessionsDir := filepath.Join(home, ".engram", "sessions")
+				sessFile := filepath.Join(sessionsDir, sessionID+".json")
+
+				// Load proxy ctx stats from the companion .ctx.json file (written by the
+				// proxy to avoid cross-process races with the stop hook).
+				if ctxOrig == 0 || ctxComp == 0 {
+					ctxFile := filepath.Join(sessionsDir, sessionID+".ctx.json")
+					if raw, err := os.ReadFile(ctxFile); err == nil {
+						var c struct {
+							CtxOrig int `json:"ctx_orig"`
+							CtxComp int `json:"ctx_comp"`
+						}
+						if json.Unmarshal(raw, &c) == nil {
+							if ctxOrig == 0 {
+								ctxOrig = c.CtxOrig
+							}
+							if ctxComp == 0 {
+								ctxComp = c.CtxComp
+							}
+						}
+					}
+				}
+
 				if raw, err := os.ReadFile(sessFile); err == nil {
 					var s struct {
 						TotalOrig  int `json:"total_orig"`
