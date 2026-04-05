@@ -100,19 +100,37 @@ the engram compression plugin. Use flags to target a specific client.`,
 					} else {
 						fmt.Fprintf(cmd.OutOrStdout(), "  Proxy headers registered in ~/.claude/settings.json (port %d)\n", proxyPort)
 					}
-					if runtime.GOOS == "darwin" {
-						home, homeErr := os.UserHomeDir()
+
+					// Ensure config exists.
+					configFilePath := DefaultConfigPath()
+					if err := config.EnsureDefault(configFilePath); err != nil {
+						return fmt.Errorf("create default config: %w", err)
+					}
+					fmt.Fprintf(cmd.OutOrStdout(), "  Config ready at %s\n", configFilePath)
+
+					// Install and start background service.
+					socketFilePath := DefaultSocketPath()
+					switch runtime.GOOS {
+					case "darwin":
 						binary, binErr := os.Executable()
-						if homeErr != nil || binErr != nil {
-							fmt.Fprintf(cmd.ErrOrStderr(), "  warning: daemon service install skipped: %v %v\n", homeErr, binErr)
-						} else {
-							configPath := filepath.Join(home, ".engram", "engram.yaml")
-							if err := installLaunchd(binary, configPath, ""); err != nil {
-								fmt.Fprintf(cmd.ErrOrStderr(), "  warning: daemon service install failed: %v\n", err)
-							} else {
-								fmt.Fprintln(cmd.OutOrStdout(), "  Daemon installed as launchd service (starts on login)")
-							}
+						if binErr != nil {
+							return fmt.Errorf("daemon service install: resolve binary: %w", binErr)
 						}
+						if err := installLaunchd(binary, configFilePath, socketFilePath); err != nil {
+							return fmt.Errorf("daemon service install: %w", err)
+						}
+						fmt.Fprintln(cmd.OutOrStdout(), "  Daemon installed as launchd service (starts on login)")
+					case "linux":
+						binary, binErr := os.Executable()
+						if binErr != nil {
+							return fmt.Errorf("daemon service install: resolve binary: %w", binErr)
+						}
+						if err := installSystemd(binary, configFilePath, socketFilePath); err != nil {
+							return fmt.Errorf("daemon service install: %w", err)
+						}
+						fmt.Fprintln(cmd.OutOrStdout(), "  Daemon installed as systemd user service")
+					default:
+						return fmt.Errorf("daemon service install: unsupported OS %q — run `engram serve` manually", runtime.GOOS)
 					}
 
 				case "openclaw":

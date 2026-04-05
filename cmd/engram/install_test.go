@@ -77,6 +77,28 @@ func TestInstallCmd_OpenClaw_InstallsPlugin(t *testing.T) {
 	require.Contains(t, out, ".openclaw/plugins/engram/engram/")
 }
 
+func TestGenerateLaunchdPlist_NonEmptySocket(t *testing.T) {
+	plist := generateLaunchdPlist(
+		"/usr/local/bin/engram",
+		"/Users/test/.engram/engram.yaml",
+		DefaultSocketPath(),
+	)
+	assert.NotContains(t, plist, `<string></string>`,
+		"plist must not contain empty string arguments")
+	assert.Contains(t, plist, ".engram/engram.sock")
+}
+
+func TestGenerateSystemdUnit_NonEmptySocket(t *testing.T) {
+	unit := generateSystemdUnit(
+		"/usr/local/bin/engram",
+		"/home/test/.engram/engram.yaml",
+		DefaultSocketPath(),
+	)
+	assert.NotContains(t, unit, "=\n",
+		"unit must not contain empty ExecStart arguments")
+	assert.Contains(t, unit, ".engram/engram.sock")
+}
+
 func TestInstallCmd_ClaudeCode_WritesStatusLine(t *testing.T) {
 	fakeHome := t.TempDir()
 	t.Setenv("HOME", fakeHome)
