@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -74,4 +75,42 @@ func TestInstallCmd_OpenClaw_InstallsPlugin(t *testing.T) {
 	out := buf.String()
 	require.NotContains(t, out, "not yet implemented")
 	require.Contains(t, out, ".openclaw/plugins/engram/engram/")
+}
+
+func TestInstallCmd_ClaudeCode_WritesStatusLine(t *testing.T) {
+	fakeHome := t.TempDir()
+	t.Setenv("HOME", fakeHome)
+
+	fakeBase := t.TempDir()
+	pluginSrc := filepath.Join(fakeBase, "plugins", "claude-code")
+	require.NoError(t, os.MkdirAll(pluginSrc, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(pluginSrc, "server.mjs"), []byte("// plugin"), 0o644))
+
+	// Create fake ~/.claude/ so DetectClaudeCode succeeds
+	require.NoError(t, os.MkdirAll(filepath.Join(fakeHome, ".claude"), 0o755))
+
+	rootCmd := newRootCmd()
+	rootCmd.AddCommand(newInstallCmd())
+
+	var buf bytes.Buffer
+	rootCmd.SetOut(&buf)
+	rootCmd.SetErr(&buf)
+
+	rootCmd.SetArgs([]string{"install", "--claude-code", "--source", fakeBase})
+	err := rootCmd.Execute()
+	require.NoError(t, err)
+
+	settingsPath := filepath.Join(fakeHome, ".claude", "settings.json")
+	data, err := os.ReadFile(settingsPath)
+	require.NoError(t, err)
+
+	var got map[string]any
+	require.NoError(t, json.Unmarshal(data, &got))
+
+	sl, ok := got["statusLine"].(map[string]any)
+	require.True(t, ok, "statusLine should be a map[string]any")
+	assert.Equal(t, "engram statusline", sl["command"])
+
+	out := buf.String()
+	assert.Contains(t, out, "settings.json")
 }

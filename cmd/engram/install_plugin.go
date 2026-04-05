@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 
 	"github.com/pythondatascrape/engram/internal/install"
 	"github.com/spf13/cobra"
@@ -79,10 +80,21 @@ the engram compression plugin. Use flags to target a specific client.`,
 
 				switch target.Name {
 				case "claude-code":
-					if err := install.RegisterClaudeCode(src, pluginVersion); err != nil {
+					if err := install.RegisterClaudeCodeWithStatusline(src, pluginVersion, ""); err != nil {
 						return fmt.Errorf("install Claude Code plugin: %w", err)
 					}
 					fmt.Fprintf(cmd.OutOrStdout(), "  Claude Code plugin installed to ~/.claude/plugins/cache/engram/engram/%s/\n", pluginVersion)
+					fmt.Fprintln(cmd.OutOrStdout(), "  Statusline registered in ~/.claude/settings.json")
+					if runtime.GOOS == "darwin" {
+						home, _ := os.UserHomeDir()
+						binary, _ := os.Executable()
+						configPath := filepath.Join(home, ".engram", "engram.yaml")
+						if err := installLaunchd(binary, configPath, ""); err != nil {
+							fmt.Fprintf(cmd.ErrOrStderr(), "  warning: daemon service install failed: %v\n", err)
+						} else {
+							fmt.Fprintln(cmd.OutOrStdout(), "  Daemon installed as launchd service (starts on login)")
+						}
+					}
 
 				case "openclaw":
 					if err := install.RegisterOpenClaw(src, pluginVersion); err != nil {
