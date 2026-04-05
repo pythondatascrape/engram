@@ -130,3 +130,26 @@ func TestRegisterClaudeCodeWithStatusline_PreservesExistingSettings(t *testing.T
 	assert.NotNil(t, got["statusLine"])
 }
 
+func TestRegisterClaudeCodeWithStatusline_DefaultsSettingsPath(t *testing.T) {
+	src := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(src, "server.mjs"), []byte("// plugin"), 0o644))
+
+	fakeHome := t.TempDir()
+	t.Setenv("HOME", fakeHome)
+
+	// Pass empty settingsPath — should default to ~/.claude/settings.json
+	err := RegisterClaudeCodeWithStatusline(src, "0.2.0", "")
+	require.NoError(t, err)
+
+	defaultPath := filepath.Join(fakeHome, ".claude", "settings.json")
+	data, err := os.ReadFile(defaultPath)
+	require.NoError(t, err)
+
+	var got map[string]any
+	require.NoError(t, json.Unmarshal(data, &got))
+
+	sl, ok := got["statusLine"].(map[string]any)
+	require.True(t, ok, "statusLine should be a map[string]any")
+	assert.Equal(t, "engram statusline", sl["command"])
+}
+
