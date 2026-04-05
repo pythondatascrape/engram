@@ -149,12 +149,8 @@ server:
 `)
 	cfg, err := config.Load(path)
 	require.NoError(t, err)
-	if cfg.Proxy.Port != 4242 {
-		t.Errorf("expected default proxy port 4242, got %d", cfg.Proxy.Port)
-	}
-	if cfg.Proxy.WindowSize != 10 {
-		t.Errorf("expected default window size 10, got %d", cfg.Proxy.WindowSize)
-	}
+	assert.Equal(t, 4242, cfg.Proxy.Port, "default proxy port")
+	assert.Equal(t, 10, cfg.Proxy.WindowSize, "default window size")
 }
 
 func TestParseSize(t *testing.T) {
