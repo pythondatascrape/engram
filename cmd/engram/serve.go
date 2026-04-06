@@ -166,7 +166,9 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// without parsing engram.yaml. Removed on clean shutdown below.
 	engramDir := filepath.Dir(sessionsDir) // ~/.engram
 	proxyPortFile := filepath.Join(engramDir, "proxy.port")
-	_ = os.WriteFile(proxyPortFile, []byte(fmt.Sprintf("%d\n", cfg.Proxy.Port)), 0o600)
+	if err := os.WriteFile(proxyPortFile, []byte(fmt.Sprintf("%d\n", cfg.Proxy.Port)), 0o600); err != nil {
+		slog.Warn("could not write proxy port file; hooks will fall back to fingerprinting", "path", proxyPortFile, "err", err)
+	}
 
 	// Wait for shutdown signal.
 	sigCh := make(chan os.Signal, 1)
