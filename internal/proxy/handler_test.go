@@ -310,3 +310,22 @@ func TestRegisterSessionRejectsEmpty(t *testing.T) {
 		t.Fatalf("got %d, want 400", rec.Code)
 	}
 }
+
+// TestRegisterSessionGetFallsThrough verifies that a GET to /internal/register-session
+// is forwarded verbatim to the proxy (falls through), not rejected with 405.
+// This locks in the design decision: only POST is intercepted; other methods proxy through.
+func TestRegisterSessionGetFallsThrough(t *testing.T) {
+	srv, _ := fakeAnthropic(t)
+	defer srv.Close()
+
+	h := NewHandler(5, t.TempDir(), srv.URL)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/internal/register-session", nil)
+	h.ServeHTTP(rec, req)
+
+	// The fake Anthropic server returns 200 for any request it receives.
+	if rec.Code != http.StatusOK {
+		t.Fatalf("got %d, want 200 (proxied through)", rec.Code)
+	}
+}

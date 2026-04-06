@@ -48,14 +48,16 @@ func NewHandler(windowSize int, sessionsDir, upstream string) *Handler {
 }
 
 // registerSession stores id as the pending session ID for the next /v1/messages
-// request. Empty and placeholder values are silently ignored.
-func (h *Handler) registerSession(id string) {
+// request. Returns true if stored, false if id is empty or a placeholder.
+func (h *Handler) registerSession(id string) bool {
 	if id == "" || isPlaceholder(id) {
-		return
+		return false
 	}
 	h.pendingMu.Lock()
 	defer h.pendingMu.Unlock()
 	h.pendingSession = id
+	slog.Debug("proxy: registered session", "session_id", id)
+	return true
 }
 
 // claimPendingSession atomically reads and clears the pending session ID.
@@ -86,12 +88,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		var body struct {
 			SessionID string `json:"session_id"`
 		}
-		if json.Unmarshal(raw, &body) != nil || body.SessionID == "" || isPlaceholder(body.SessionID) {
+		if json.Unmarshal(raw, &body) != nil {
 			http.Error(w, "invalid session_id", http.StatusBadRequest)
 			return
 		}
-		h.registerSession(body.SessionID)
-		slog.Debug("engram proxy: registered session", "session_id", body.SessionID)
+		if !h.registerSession(body.SessionID) {
+			http.Error(w, "invalid session_id", http.StatusBadRequest)
+			return
+		}
 		w.WriteHeader(http.StatusOK)
 		return
 	}
