@@ -5,7 +5,9 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"log/slog"
 	"net/http"
+	"sync"
 )
 
 // engramSessionHeader is the request header used to pass the session ID from
@@ -26,6 +28,13 @@ type Handler struct {
 	// afterStats is called after each WriteStats completes. Used in tests to
 	// avoid time.Sleep races; nil in production.
 	afterStats func()
+
+	// pendingSession holds the Claude session UUID registered by the sessionstart
+	// hook before the first /v1/messages request. Claimed (read-and-cleared) by
+	// the next intercepted request. Last-write-wins for concurrent sessions (this
+	// is single-user local software).
+	pendingMu      sync.Mutex
+	pendingSession string
 }
 
 // NewHandler creates a new Handler.
@@ -38,6 +47,27 @@ func NewHandler(windowSize int, sessionsDir, upstream string) *Handler {
 	}
 }
 
+// registerSession stores id as the pending session ID for the next /v1/messages
+// request. Empty and placeholder values are silently ignored.
+func (h *Handler) registerSession(id string) {
+	if id == "" || isPlaceholder(id) {
+		return
+	}
+	h.pendingMu.Lock()
+	defer h.pendingMu.Unlock()
+	h.pendingSession = id
+}
+
+// claimPendingSession atomically reads and clears the pending session ID.
+// Returns "" if no session has been registered.
+func (h *Handler) claimPendingSession() string {
+	h.pendingMu.Lock()
+	defer h.pendingMu.Unlock()
+	id := h.pendingSession
+	h.pendingSession = ""
+	return id
+}
+
 // anthropicRequest is the subset of the Anthropic messages request we care about.
 type anthropicRequest struct {
 	Messages []AnthropicMessage `json:"messages"`
@@ -46,6 +76,26 @@ type anthropicRequest struct {
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// Handle session registration from the sessionstart hook.
+	if r.URL.Path == "/internal/register-session" && r.Method == http.MethodPost {
+		raw, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, "read body", http.StatusBadRequest)
+			return
+		}
+		var body struct {
+			SessionID string `json:"session_id"`
+		}
+		if json.Unmarshal(raw, &body) != nil || body.SessionID == "" || isPlaceholder(body.SessionID) {
+			http.Error(w, "invalid session_id", http.StatusBadRequest)
+			return
+		}
+		h.registerSession(body.SessionID)
+		slog.Debug("engram proxy: registered session", "session_id", body.SessionID)
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
 	// Only intercept POST /v1/messages.
 	if r.URL.Path != "/v1/messages" || r.Method != http.MethodPost {
 		h.forwardVerbatim(w, r, nil)

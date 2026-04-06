@@ -252,3 +252,61 @@ func TestPlaceholderSessionIDFallsBackToFingerprint(t *testing.T) {
 		t.Fatal("placeholder file ${session_id}.ctx.json should not have been created")
 	}
 }
+
+// TestRegisterSessionEndpoint verifies that a valid POST stores the session ID
+// and a subsequent claimPendingSession returns and clears it.
+func TestRegisterSessionEndpoint(t *testing.T) {
+	srv, _ := fakeAnthropic(t)
+	defer srv.Close()
+
+	h := NewHandler(5, t.TempDir(), srv.URL)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/internal/register-session",
+		strings.NewReader(`{"session_id":"abc-123"}`))
+	req.Header.Set("Content-Type", "application/json")
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("got %d, want 200", rec.Code)
+	}
+	if got := h.claimPendingSession(); got != "abc-123" {
+		t.Fatalf("claimPendingSession() = %q, want %q", got, "abc-123")
+	}
+	// Second claim must be empty.
+	if got := h.claimPendingSession(); got != "" {
+		t.Fatalf("expected empty after claim, got %q", got)
+	}
+}
+
+// TestRegisterSessionRejectsPlaceholder verifies that the literal "${session_id}"
+// injected by engram install is rejected with 400, not stored.
+func TestRegisterSessionRejectsPlaceholder(t *testing.T) {
+	h := NewHandler(5, t.TempDir(), "")
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/internal/register-session",
+		strings.NewReader(`{"session_id":"${session_id}"}`))
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("got %d, want 400", rec.Code)
+	}
+	if got := h.claimPendingSession(); got != "" {
+		t.Fatalf("placeholder must not be stored, got %q", got)
+	}
+}
+
+// TestRegisterSessionRejectsEmpty verifies that an empty session_id returns 400.
+func TestRegisterSessionRejectsEmpty(t *testing.T) {
+	h := NewHandler(5, t.TempDir(), "")
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/internal/register-session",
+		strings.NewReader(`{"session_id":""}`))
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("got %d, want 400", rec.Code)
+	}
+}
