@@ -163,7 +163,8 @@ func runServe(cmd *cobra.Command, args []string) error {
 	slog.Info("proxy listening", "port", cfg.Proxy.Port)
 
 	// Write the proxy port to a well-known file so JS hooks can discover it
-	// without parsing engram.yaml. Removed on clean shutdown below.
+	// without parsing engram.yaml. Always overwrites any stale file from a
+	// previous crash. Removed on clean shutdown below.
 	engramDir := filepath.Dir(sessionsDir) // ~/.engram
 	proxyPortFile := filepath.Join(engramDir, "proxy.port")
 	if err := os.WriteFile(proxyPortFile, []byte(fmt.Sprintf("%d\n", cfg.Proxy.Port)), 0o600); err != nil {

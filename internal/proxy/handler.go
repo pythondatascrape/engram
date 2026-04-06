@@ -30,9 +30,11 @@ type Handler struct {
 	afterStats func()
 
 	// pendingSession holds the Claude session UUID registered by the sessionstart
-	// hook before the first /v1/messages request. Claimed (read-and-cleared) by
-	// the next intercepted request. Last-write-wins for concurrent sessions (this
-	// is single-user local software).
+	// hook before the first /v1/messages request. First-request-claims: the next
+	// intercepted /v1/messages call atomically reads and clears it. For concurrent
+	// sessions (rare on single-user local software), the last registration wins the
+	// store but the first /v1/messages request wins the claim — whichever session
+	// gets its request in first will use the registered UUID.
 	pendingMu      sync.Mutex
 	pendingSession string
 }
