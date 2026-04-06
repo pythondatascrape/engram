@@ -162,6 +162,12 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}
 	slog.Info("proxy listening", "port", cfg.Proxy.Port)
 
+	// Write the proxy port to a well-known file so JS hooks can discover it
+	// without parsing engram.yaml. Removed on clean shutdown below.
+	engramDir := filepath.Dir(sessionsDir) // ~/.engram
+	proxyPortFile := filepath.Join(engramDir, "proxy.port")
+	_ = os.WriteFile(proxyPortFile, []byte(fmt.Sprintf("%d\n", cfg.Proxy.Port)), 0o600)
+
 	// Wait for shutdown signal.
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
@@ -179,6 +185,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer shutdownCancel()
 	_ = proxySrv.Stop(shutdownCtx)
+	_ = os.Remove(proxyPortFile)
 
 	srv.Stop()
 	slog.Info("engram daemon stopped")
