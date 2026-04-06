@@ -17,12 +17,12 @@ import { homedir } from 'os';
 import { createInterface } from 'readline';
 
 async function readStdin() {
+  if (process.stdin.isTTY) return '';
   return new Promise((resolve) => {
     const lines = [];
     const rl = createInterface({ input: process.stdin, terminal: false });
     rl.on('line', (line) => lines.push(line));
     rl.on('close', () => resolve(lines.join('\n')));
-    if (process.stdin.isTTY) resolve('');
   });
 }
 
