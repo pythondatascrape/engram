@@ -121,10 +121,18 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Determine session ID.
+	// Determine session ID. Prefer the UUID registered by the sessionstart hook
+	// (via /internal/register-session). Fall back to the system-prompt fingerprint
+	// when no session was registered (e.g. proxy running without the hook).
 	sessionID := r.Header.Get(engramSessionHeader)
 	if sessionID == "" || isPlaceholder(sessionID) {
-		sessionID = SessionID(req.System)
+		if pending := h.claimPendingSession(); pending != "" {
+			sessionID = pending
+		} else {
+			slog.Warn("proxy: no registered session, falling back to fingerprint ID",
+				"fingerprint", SessionID(req.System))
+			sessionID = SessionID(req.System)
+		}
 	}
 
 	// Measure before and after compression.
