@@ -79,6 +79,10 @@ async function main() {
     }
   }
 
+  // Always register with proxy so context stats are attributed to the correct
+  // session UUID even when there are no CLAUDE.md files to inject.
+  await registerSession(sessionId);
+
   const projectDir = process.env.CLAUDE_PROJECT_DIR;
   if (!projectDir) process.exit(0);
 
@@ -87,11 +91,6 @@ async function main() {
 
   const combinedContent = files.map((f) => f.content).join('\n');
   if (!combinedContent.trim()) process.exit(0);
-
-  // Register with proxy before outputting the codebook message.
-  // This fires before the first API request, so the proxy will have the
-  // session ID ready when the message request arrives.
-  await registerSession(sessionId);
 
   const fileList = files.map((f) => f.path).join(', ');
   const message = {
