@@ -28,7 +28,6 @@ type Recommendation struct {
 type SessionStats struct {
 	Turns               int
 	IdentityTokensSaved int
-	ContextTokensSaved  int
 	TotalTokensSent     int
 }
 
@@ -71,7 +70,6 @@ func NewAdvisor(stateDir string) (*Advisor, error) {
 func (a *Advisor) RecordSession(stats SessionStats) {
 	a.State.TotalSessions++
 	a.State.TotalIdentitySaved += stats.IdentityTokensSaved
-	a.State.TotalContextSaved += stats.ContextTokensSaved
 	a.State.TotalTokensSent += stats.TotalTokensSent
 	a.State.TotalTurns += stats.Turns
 	a.State.LastUpdated = time.Now()

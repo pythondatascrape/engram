@@ -17,10 +17,17 @@ type PromptParts struct {
 }
 
 // AssemblePrompt creates the structured system prompt with [IDENTITY],
-// optional [KNOWLEDGE], optional [CONTEXT_CODEBOOK], optional [RESPONSE_CODEBOOK],
-// optional [HISTORY], and [QUERY] delimiters.
+// optional [KNOWLEDGE], [CONTEXT_CODEBOOK], [RESPONSE_CODEBOOK], [HISTORY], and [QUERY] delimiters.
 func AssemblePrompt(parts PromptParts) string {
 	var b strings.Builder
+
+	// Pre-allocate a rough estimate to avoid repeated Builder reallocation.
+	size := len(parts.Identity) + len(parts.Knowledge) + len(parts.ContextCodebookDef) +
+		len(parts.ResponseCodebookDef) + len(parts.Query) + 128
+	for _, m := range parts.History {
+		size += len(m.Role) + len(m.Content) + 4
+	}
+	b.Grow(size)
 
 	b.WriteString("[IDENTITY]\n")
 	b.WriteString(parts.Identity)

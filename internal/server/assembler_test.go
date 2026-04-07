@@ -3,9 +3,12 @@ package server_test
 import (
 	"testing"
 
-	engramctx "github.com/pythondatascrape/engram/internal/context"
-	"github.com/pythondatascrape/engram/internal/server"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	engramctx "github.com/pythondatascrape/engram/internal/context"
+	"github.com/pythondatascrape/engram/internal/provider"
+	"github.com/pythondatascrape/engram/internal/server"
 )
 
 func TestAssemblePrompt(t *testing.T) {
@@ -89,11 +92,12 @@ func TestAssemblePrompt_WithContextCodebook(t *testing.T) {
 }
 
 func TestAssemblePrompt_WithHistory(t *testing.T) {
-	cb, _ := engramctx.DeriveCodebook("app", map[string]string{
+	cb, err := engramctx.DeriveCodebook("app", map[string]string{
 		"role": "text", "content": "text",
 	})
+	require.NoError(t, err)
 	h := engramctx.NewHistory()
-	h.Append(cb, map[string]string{"role": "user", "content": "prior turn"}, "role=assistant content=ok")
+	require.NoError(t, h.Append(cb, map[string]string{"role": "user", "content": "prior turn"}, "role=assistant content=ok"))
 
 	result := server.AssemblePrompt(server.PromptParts{
 		Identity: "domain=travel",
@@ -104,7 +108,23 @@ func TestAssemblePrompt_WithHistory(t *testing.T) {
 	assert.Contains(t, result, "role=user")
 }
 
+func TestAssemblePrompt_WithHistoryMessages(t *testing.T) {
+	msgs := []provider.Message{
+		{Role: "user", Content: "hello"},
+		{Role: "assistant", Content: "world"},
+	}
+	result := server.AssemblePrompt(server.PromptParts{
+		Identity: "domain=test",
+		History:  msgs,
+		Query:    "next",
+	})
+	assert.Contains(t, result, "[HISTORY]")
+	assert.Contains(t, result, "user: hello")
+	assert.Contains(t, result, "assistant: world")
+}
+
 func TestAssemblePrompt_NoHistoryNoCodebook(t *testing.T) {
+	// Existing behavior unchanged when no history/codebook provided
 	result := server.AssemblePrompt(server.PromptParts{
 		Identity: "domain=fire rank=captain",
 		Query:    "egress?",

@@ -1,3 +1,4 @@
+// internal/context/codebook_test.go
 package context_test
 
 import (
@@ -8,47 +9,86 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestDeriveCodebook_BasicFields(t *testing.T) {
-	schema := map[string]string{
-		"role":    "enum:user,assistant,tool",
-		"content": "text",
+func TestDeriveCodebook(t *testing.T) {
+	tests := []struct {
+		name       string
+		cbName     string
+		schema     map[string]string
+		wantErr    bool
+		wantName   string
+		wantKeyLen int
+	}{
+		{
+			name:       "BasicFields",
+			cbName:     "travel_agent",
+			schema:     map[string]string{"role": "enum:user,assistant,tool", "content": "text"},
+			wantErr:    false,
+			wantName:   "travel_agent",
+			wantKeyLen: 2,
+		},
+		{
+			name:       "EmptySchema",
+			cbName:     "app",
+			schema:     map[string]string{},
+			wantErr:    true,
+			wantName:   "",
+			wantKeyLen: 0,
+		},
 	}
-	cb, err := engramctx.DeriveCodebook("travel_agent", schema)
-	require.NoError(t, err)
-	assert.Equal(t, "travel_agent", cb.Name)
-	assert.Len(t, cb.Keys(), 2)
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cb, err := engramctx.DeriveCodebook(tt.cbName, tt.schema)
+			if tt.wantErr {
+				assert.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantName, cb.Name)
+			assert.Len(t, cb.Keys(), tt.wantKeyLen)
+		})
+	}
 }
 
-func TestDeriveCodebook_EmptySchema(t *testing.T) {
-	_, err := engramctx.DeriveCodebook("app", map[string]string{})
-	assert.Error(t, err)
-}
-
-func TestSerializeTurn_RoundTrip(t *testing.T) {
-	schema := map[string]string{
-		"role":    "enum:user,assistant",
-		"content": "text",
+func TestSerializeTurn(t *testing.T) {
+	tests := []struct {
+		name         string
+		schema       map[string]string
+		turn         map[string]string
+		wantErr      bool
+		wantContains []string
+	}{
+		{
+			name:         "RoundTrip",
+			schema:       map[string]string{"role": "enum:user,assistant", "content": "text"},
+			turn:         map[string]string{"role": "user", "content": "What flights are available?"},
+			wantErr:      false,
+			wantContains: []string{"role=user", "content=What flights are available?"},
+		},
+		{
+			name:    "UnknownField",
+			schema:  map[string]string{"role": "text"},
+			turn:    map[string]string{"role": "user", "unknown": "val"},
+			wantErr: true,
+		},
 	}
-	cb, err := engramctx.DeriveCodebook("app", schema)
-	require.NoError(t, err)
 
-	turn := map[string]string{
-		"role":    "user",
-		"content": "What flights are available?",
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cb, err := engramctx.DeriveCodebook("app", tt.schema)
+			require.NoError(t, err)
+
+			compressed, err := cb.SerializeTurn(tt.turn)
+			if tt.wantErr {
+				assert.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			for _, want := range tt.wantContains {
+				assert.Contains(t, compressed, want)
+			}
+		})
 	}
-	compressed, err := cb.SerializeTurn(turn)
-	require.NoError(t, err)
-	assert.Contains(t, compressed, "role=user")
-	assert.Contains(t, compressed, "content=What flights are available?")
-}
-
-func TestSerializeTurn_UnknownField(t *testing.T) {
-	schema := map[string]string{"role": "text"}
-	cb, err := engramctx.DeriveCodebook("app", schema)
-	require.NoError(t, err)
-
-	_, err = cb.SerializeTurn(map[string]string{"role": "user", "unknown": "val"})
-	assert.Error(t, err)
 }
 
 func TestDefinition_ContainsAllKeys(t *testing.T) {
@@ -57,7 +97,8 @@ func TestDefinition_ContainsAllKeys(t *testing.T) {
 		"content": "text",
 		"city":    "text",
 	}
-	cb, _ := engramctx.DeriveCodebook("travel_agent", schema)
+	cb, err := engramctx.DeriveCodebook("travel_agent", schema)
+	require.NoError(t, err)
 	def := cb.Definition()
 	assert.Contains(t, def, "role")
 	assert.Contains(t, def, "content")

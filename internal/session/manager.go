@@ -87,12 +87,12 @@ func (m *Manager) SetIdentity(id, serialized string) error {
 }
 
 // RecordTurn increments the turn counter, accumulates token counts, and touches LastActivity.
-func (m *Manager) RecordTurn(id string, tokensSent, identitySaved, contextSaved, baselineThisTurn, rawTurnBytes int) error {
+func (m *Manager) RecordTurn(id string, tokensSent, tokensSaved int) error {
 	s, err := m.Get(id)
 	if err != nil {
 		return err
 	}
-	s.RecordTurn(tokensSent, identitySaved, contextSaved, baselineThisTurn, rawTurnBytes)
+	s.RecordTurn(tokensSent, tokensSaved)
 	return nil
 }
 
@@ -163,12 +163,10 @@ func (m *Manager) Count() int {
 
 // AggregateStats holds cumulative token accounting across all active sessions.
 type AggregateStats struct {
-	ActiveSessions     int
-	TotalTurns         int
-	CumulativeBaseline int
-	TokensSent         int
-	TokensSaved        int
-	ContextTokensSaved int
+	ActiveSessions int
+	TotalTurns     int
+	TokensSent     int
+	TokensSaved    int
 }
 
 // Stats returns cumulative token accounting summed across all active sessions.
@@ -180,10 +178,8 @@ func (m *Manager) Stats() AggregateStats {
 	for _, sess := range m.sessions {
 		snap := sess.Snapshot()
 		s.TotalTurns += snap.Turns
-		s.CumulativeBaseline += snap.CumulativeBaseline
 		s.TokensSent += snap.TokensSent
 		s.TokensSaved += snap.TokensSaved
-		s.ContextTokensSaved += snap.ContextTokensSaved
 	}
 	return s
 }

@@ -21,7 +21,7 @@ func TestAdvisor_RoundTrip(t *testing.T) {
 	adv.RecordSession(SessionStats{
 		Turns:               5,
 		IdentityTokensSaved: 2000,
-		ContextTokensSaved:  500,
+
 		TotalTokensSent:     3000,
 	})
 	require.NoError(t, adv.Save())

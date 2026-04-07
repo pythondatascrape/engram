@@ -22,7 +22,6 @@ func OnSessionComplete(adv *Advisor, s *session.Session) error {
 	stats := SessionStats{
 		Turns:               snap.Turns,
 		IdentityTokensSaved: snap.TokensSaved,
-		ContextTokensSaved:  snap.ContextTokensSaved,
 		TotalTokensSent:     snap.TokensSent,
 	}
 	adv.RecordSession(stats)

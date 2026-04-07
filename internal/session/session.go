@@ -39,13 +39,10 @@ type Session struct {
 	LastActivity       time.Time
 	Opts               Opts
 	SerializedIdentity string
-	Turns               int
-	TokensSent          int
-	TokensSaved         int
-	ContextTokensSaved  int
-	CumulativeBaseline  int // sum of per-turn "what would have been sent without Engram"
-	RawHistoryBytes     int // running total of raw turn sizes (for next turn's baseline)
-	IdentityTokens      int
+	Turns              int
+	TokensSent         int
+	TokensSaved        int
+	IdentityTokens     int
 	History            *engramctx.History
 	ContextCodebook    *engramctx.ContextCodebook
 }
@@ -90,13 +87,6 @@ func (s *Session) SetIdentity(serialized string) {
 	s.SerializedIdentity = serialized
 }
 
-// SetIdentityTokens stores the raw (uncompressed) identity character count for savings tracking.
-func (s *Session) SetIdentityTokens(n int) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.IdentityTokens = n
-}
-
 // SetContextCodebook stores the derived context codebook on the session.
 func (s *Session) SetContextCodebook(cb *engramctx.ContextCodebook) {
 	s.mu.Lock()
@@ -111,33 +101,14 @@ func (s *Session) SetHistory(h *engramctx.History) {
 	s.History = h
 }
 
-// IdentityBaseline returns the raw identity char count used for savings tracking.
-func (s *Session) IdentityBaseline() int {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.IdentityTokens
-}
-
-// RecordTurn increments the turn counter and accumulates all token counts.
-// baselineThisTurn is what would have been sent without any Engram compression.
-// rawTurnBytes is the raw size of this turn's query+response (for next turn's baseline).
-func (s *Session) RecordTurn(tokensSent, identitySaved, contextSaved, baselineThisTurn, rawTurnBytes int) {
+// RecordTurn increments the turn counter and accumulates token counts directly.
+func (s *Session) RecordTurn(tokensSent, tokensSaved int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.Turns++
 	s.TokensSent += tokensSent
-	s.TokensSaved += identitySaved
-	s.ContextTokensSaved += contextSaved
-	s.CumulativeBaseline += baselineThisTurn
-	s.RawHistoryBytes += rawTurnBytes
+	s.TokensSaved += tokensSaved
 	s.LastActivity = time.Now()
-}
-
-// RawHistory returns the accumulated raw turn bytes (query+response) from all prior turns.
-func (s *Session) RawHistory() int {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.RawHistoryBytes
 }
 
 // Touch updates LastActivity to now.
@@ -182,12 +153,9 @@ func (s *Session) Snapshot() Session {
 		Opts:               s.Opts,
 		SerializedIdentity: s.SerializedIdentity,
 		Turns:              s.Turns,
-		TokensSent:          s.TokensSent,
-		TokensSaved:         s.TokensSaved,
-		ContextTokensSaved:  s.ContextTokensSaved,
-		CumulativeBaseline:  s.CumulativeBaseline,
-		RawHistoryBytes:     s.RawHistoryBytes,
-		IdentityTokens:      s.IdentityTokens,
+		TokensSent:         s.TokensSent,
+		TokensSaved:        s.TokensSaved,
+		IdentityTokens:     s.IdentityTokens,
 		History:            s.History,
 		ContextCodebook:    s.ContextCodebook,
 	}

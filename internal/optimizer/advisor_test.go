@@ -15,7 +15,7 @@ func TestAdvisor_RecordAndRecommend(t *testing.T) {
 	adv.RecordSession(SessionStats{
 		Turns:               10,
 		IdentityTokensSaved: 2500,
-		ContextTokensSaved:  800,
+
 		TotalTokensSent:     5000,
 	})
 
@@ -31,7 +31,7 @@ func TestAdvisor_PersistsState(t *testing.T) {
 	adv.RecordSession(SessionStats{
 		Turns:               5,
 		IdentityTokensSaved: 1000,
-		ContextTokensSaved:  400,
+
 		TotalTokensSent:     2000,
 	})
 
@@ -51,7 +51,7 @@ func TestAdvisor_DetectsUncompressedOpportunity(t *testing.T) {
 	adv.RecordSession(SessionStats{
 		Turns:               20,
 		IdentityTokensSaved: 100,
-		ContextTokensSaved:  50,
+
 		TotalTokensSent:     50000,
 	})
 

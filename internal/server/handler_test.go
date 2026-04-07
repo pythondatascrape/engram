@@ -284,70 +284,7 @@ func TestHandleRequest_ResponseSizeCapped(t *testing.T) {
 	assert.LessOrEqual(t, len(resp.FullText), maxResponseBytes+1024)
 }
 
-func TestHandlerRecordsTokensSaved(t *testing.T) {
-	const minimalCodebookYAML = `
-name: test
-version: 1
-dimensions:
-  - name: lang
-    type: enum
-    required: true
-    values: [go]
-  - name: experience
-    type: enum
-    required: false
-    values: [senior]
-`
-	cb, err := codebook.Parse([]byte(minimalCodebookYAML))
-	require.NoError(t, err)
-
-	mgr := session.NewManager(session.ManagerConfig{MaxSessions: 100})
-	ser := serializer.New()
-	fakeFactory := func(_ string) (provider.Provider, error) {
-		return &fakeProvider{response: "ok"}, nil
-	}
-	p := pool.New(pool.Config{MaxConnections: 2}, fakeFactory)
-	h := NewHandler(mgr, ser, cb, p)
-
-	identity := map[string]string{"lang": "go", "experience": "senior"}
-
-	serialized, err := ser.Serialize(cb, identity)
-	require.NoError(t, err)
-
-	verboseBaseline := "You are a senior Go software engineer. Please follow these conventions in all code you write."
-
-	assert.Less(t, len(serialized), len(verboseBaseline),
-		"compact serialized form should be shorter than verbose baseline")
-
-	req := IncomingRequest{
-		ClientID:            "client-savings",
-		APIKey:              "key-abc",
-		Query:               "What is the idiomatic way to handle errors?",
-		Identity:            identity,
-		Opts:                session.Opts{Provider: "fake", Model: "fake-model"},
-		VerboseIdentitySize: len(verboseBaseline),
-	}
-
-	resp, err := h.HandleRequest(context.Background(), req)
-	require.NoError(t, err)
-
-	sess, err := mgr.Get(resp.SessionID)
-	require.NoError(t, err)
-	snap := sess.Snapshot()
-
-	savedPct := 0.0
-	if snap.IdentityTokens > 0 {
-		savedPct = float64(snap.TokensSaved) / float64(snap.IdentityTokens) * 100.0
-	}
-
-	t.Logf("serialized=%d verbose=%d tokensSent=%d tokensSaved=%d savedPct=%.1f%%",
-		len(serialized), len(verboseBaseline), snap.TokensSent, snap.TokensSaved, savedPct)
-
-	assert.Greater(t, snap.TokensSaved, 0, "TokensSaved should be > 0")
-	assert.Greater(t, savedPct, 0.0, "savedPct should be > 0.0")
-}
-
-func TestHandleRequest_ContextCodebookStored(t *testing.T) {
+func TestHandle_ContextCodebookStored(t *testing.T) {
 	ctx := context.Background()
 	mgr, ser, cb, p := newTestDeps(t)
 	h := NewHandler(mgr, ser, cb, p)
@@ -361,6 +298,7 @@ func TestHandleRequest_ContextCodebookStored(t *testing.T) {
 			"role":    "enum:user,assistant",
 			"content": "text",
 		},
+		Opts: session.Opts{Provider: "fake", Model: "fake-model"},
 	}
 	resp, err := h.HandleRequest(ctx, req)
 	require.NoError(t, err)
@@ -372,7 +310,7 @@ func TestHandleRequest_ContextCodebookStored(t *testing.T) {
 	assert.NotNil(t, snap.History)
 }
 
-func TestHandleRequest_HistoryGrowsAcrossTurns(t *testing.T) {
+func TestHandle_HistoryGrowsAcrossTurns(t *testing.T) {
 	ctx := context.Background()
 	mgr, ser, cb, p := newTestDeps(t)
 	h := NewHandler(mgr, ser, cb, p)
@@ -383,6 +321,7 @@ func TestHandleRequest_HistoryGrowsAcrossTurns(t *testing.T) {
 		Query:    "turn one",
 		Identity: map[string]string{"role": "admin", "domain": "fire"},
 		ContextSchema: map[string]string{"role": "text", "content": "text"},
+		Opts:          session.Opts{Provider: "fake", Model: "fake-model"},
 	})
 	require.NoError(t, err)
 
@@ -391,11 +330,12 @@ func TestHandleRequest_HistoryGrowsAcrossTurns(t *testing.T) {
 		APIKey:    "key-1",
 		SessionID: first.SessionID,
 		Query:     "turn two",
+		Opts:      session.Opts{Provider: "fake", Model: "fake-model"},
 	})
 	require.NoError(t, err)
 
 	sess, _ := mgr.Get(first.SessionID)
-	assert.Equal(t, 2, sess.Snapshot().History.Len()) // both turns stored in history
+	assert.Equal(t, 2, sess.Snapshot().History.Len()) // both turns stored after completion
 }
 
 func TestHandleRequest_SessionLimitExceeded(t *testing.T) {

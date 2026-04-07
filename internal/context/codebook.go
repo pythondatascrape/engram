@@ -10,8 +10,8 @@ import (
 // ContextCodebook holds a derived codebook for compressing conversation turns.
 type ContextCodebook struct {
 	Name   string
-	keys   []string
-	schema map[string]string
+	keys   []string          // sorted field names from schema
+	schema map[string]string // field name → type hint (stored for Definition())
 }
 
 // DeriveCodebook derives a ContextCodebook from a schema map.
@@ -73,6 +73,7 @@ func (c *ContextCodebook) SerializeTurn(turn map[string]string) (string, error) 
 
 // Definition returns a compact human-readable codebook definition for injection
 // into the system prompt so the LLM understands the compressed format.
+// Format: "name: field1(type) field2(type) ..."
 func (c *ContextCodebook) Definition() string {
 	var b strings.Builder
 	b.WriteString(c.Name)

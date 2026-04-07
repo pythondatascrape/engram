@@ -12,8 +12,7 @@ type CompressedTurn struct {
 
 // History accumulates compressed turn pairs for a session.
 type History struct {
-	turns      []CompressedTurn
-	totalBytes int
+	turns []CompressedTurn
 }
 
 // NewHistory returns an empty History.
@@ -28,9 +27,10 @@ func (h *History) Append(cb *ContextCodebook, requestTurn map[string]string, com
 	if err != nil {
 		return err
 	}
-	t := CompressedTurn{Request: compressed, Response: compressedResponse}
-	h.totalBytes += len(t.Request) + len(t.Response)
-	h.turns = append(h.turns, t)
+	h.turns = append(h.turns, CompressedTurn{
+		Request:  compressed,
+		Response: compressedResponse,
+	})
 	return nil
 }
 
@@ -53,6 +53,11 @@ func (h *History) Messages() []provider.Message {
 }
 
 // TokenCount returns a rough byte-based token estimate for the full history.
+// Uses the same approximation as the rest of the server (byte length).
 func (h *History) TokenCount() int {
-	return h.totalBytes
+	total := 0
+	for _, t := range h.turns {
+		total += len(t.Request) + len(t.Response)
+	}
+	return total
 }

@@ -198,11 +198,9 @@ func (s *Server) handleStats(req RPCRequest) RPCResponse {
 		agg := s.sessions.Stats()
 		result.ActiveSessions = agg.ActiveSessions
 		result.TotalTurns = agg.TotalTurns
-		result.CumulativeBaseline = agg.CumulativeBaseline
 		result.TokensSent = agg.TokensSent
 		result.TokensSaved = agg.TokensSaved
-		result.ContextTokensSaved = agg.ContextTokensSaved
-		result.TotalSaved = agg.TokensSaved + agg.ContextTokensSaved
+		result.TotalSaved = agg.TokensSaved
 	}
 	return RPCResponse{JSONRPC: "2.0", Result: mustMarshal(result), ID: req.ID}
 }

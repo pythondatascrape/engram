@@ -13,19 +13,19 @@ import (
 	"github.com/pythondatascrape/engram/internal/provider/pool"
 	"github.com/pythondatascrape/engram/internal/security"
 	"github.com/pythondatascrape/engram/internal/session"
+
 	engramctx "github.com/pythondatascrape/engram/internal/context"
 )
 
 // IncomingRequest holds all fields sent by the client for a single turn.
 type IncomingRequest struct {
-	ClientID  string
-	APIKey    string
-	SessionID string
-	Query     string
-	Identity            map[string]string
-	ContextSchema       map[string]string // optional — field name → type hint for context codebook
-	Opts                session.Opts
-	VerboseIdentitySize int // baseline char count for savings calculation (optional)
+	ClientID      string
+	APIKey        string
+	SessionID     string
+	Query         string
+	Identity      map[string]string
+	ContextSchema map[string]string // optional — field name → type hint for context codebook
+	Opts          session.Opts
 }
 
 // Response is the result returned to the caller after a turn is processed.
@@ -39,7 +39,6 @@ const (
 	maxQueryBytes    = 32 * 1024   // 32 KB
 	maxIdentityBytes = 4 * 1024    // 4 KB total across all k/v pairs
 	maxResponseBytes = 1024 * 1024 // 1 MB
-	jsonMsgOverhead  = 54          // per-turn JSON wire format overhead: {"role":"user","content":"..."} + assistant counterpart
 )
 
 // Handler orchestrates identity serialization, session management, prompt
@@ -130,13 +129,6 @@ func (h *Handler) HandleRequest(ctx context.Context, req IncomingRequest) (Respo
 			return Response{}, err
 		}
 		s.SetIdentity(serialized)
-		rawSize := req.VerboseIdentitySize
-		if rawSize == 0 {
-			for k, v := range req.Identity {
-				rawSize += len(k) + len(v) + 2
-			}
-		}
-		s.SetIdentityTokens(rawSize)
 		if len(req.ContextSchema) > 0 {
 			ctxCB, err := engramctx.DeriveCodebook(req.ClientID, req.ContextSchema)
 			if err != nil {
@@ -160,31 +152,22 @@ func (h *Handler) HandleRequest(ctx context.Context, req IncomingRequest) (Respo
 
 	rctx := sess.RequestCtx()
 
-	var history []provider.Message
+	var histMsgs []provider.Message
 	if rctx.History != nil {
-		history = rctx.History.Messages()
+		histMsgs = rctx.History.Messages()
 	}
 
 	var ctxCodebookDef, respCodebookDef string
 	if rctx.ContextCodebook != nil {
-		// Only inject codebook definitions on the first turn; the LLM retains
-		// them in context for subsequent turns, saving ~197 bytes per turn.
-		firstTurn := rctx.History == nil || rctx.History.Len() == 0
-		if firstTurn {
-			ctxCodebookDef = rctx.ContextCodebook.Definition()
-			if sess.Opts.Provider == "openai" {
-				respCodebookDef = engramctx.OpenAIResponseCodebook().Definition()
-			} else {
-				respCodebookDef = engramctx.AnthropicResponseCodebook().Definition()
-			}
-		}
+		ctxCodebookDef = rctx.ContextCodebook.Definition()
+		respCodebookDef = engramctx.AnthropicResponseCodebook().Definition()
 	}
 
 	prompt := AssemblePrompt(PromptParts{
 		Identity:            rctx.SerializedIdentity,
 		ContextCodebookDef:  ctxCodebookDef,
 		ResponseCodebookDef: respCodebookDef,
-		History:             history,
+		History:             histMsgs,
 		Query:               req.Query,
 	})
 
@@ -197,7 +180,7 @@ func (h *Handler) HandleRequest(ctx context.Context, req IncomingRequest) (Respo
 		Model:               rctx.Model,
 		SystemPrompt:        prompt,
 		Query:               req.Query,
-		ConversationHistory: history,
+		ConversationHistory: histMsgs,
 	})
 	if err != nil {
 		h.pool.Return(conn)
@@ -206,61 +189,31 @@ func (h *Handler) HandleRequest(ctx context.Context, req IncomingRequest) (Respo
 
 	var sb strings.Builder
 	for chunk := range chunks {
-		if len(chunk.Text) > 0 {
-			if sb.Len()+len(chunk.Text) > maxResponseBytes {
-				sb.WriteString(chunk.Text[:maxResponseBytes-sb.Len()])
-				break
-			}
-			sb.WriteString(chunk.Text)
-		}
 		if chunk.Done {
 			break
 		}
+		if sb.Len()+len(chunk.Text) > maxResponseBytes {
+			sb.WriteString(chunk.Text[:maxResponseBytes-sb.Len()])
+			break
+		}
+		sb.WriteString(chunk.Text)
 	}
 	fullText := sb.String()
 
-	// Baseline for this turn: what would have been sent without any Engram compression.
-	// = verbose identity size + raw history accumulated so far (JSON format) + query
-	identityBaseline := sess.IdentityBaseline()
-	rawHistoryNow := sess.RawHistory()
-	baselineThisTurn := identityBaseline + rawHistoryNow + len(req.Query)
+	h.pool.Return(conn)
 
-	var contextSaved int
-	rawTurnBytes := jsonMsgOverhead + len(req.Query) + len(fullText)
 	if rctx.ContextCodebook != nil && rctx.History != nil {
 		requestTurn := map[string]string{
 			"role":    "user",
 			"content": req.Query,
 		}
-		compressedResp := "role=assistant content=" + fullText
-		before := rctx.History.TokenCount()
-		_ = rctx.History.Append(rctx.ContextCodebook, requestTurn, compressedResp)
-		compressedSize := rctx.History.TokenCount() - before
-		if rawTurnBytes > compressedSize {
-			contextSaved = rawTurnBytes - compressedSize
-		}
+		_ = rctx.History.Append(rctx.ContextCodebook, requestTurn, "role=assistant content="+fullText)
 	}
 
-	h.pool.Return(conn)
-
-	// prompt already contains the query via AssemblePrompt.
 	tokensSent := len(prompt)
-	identitySaved := 0
-	if identityBaseline > 0 {
-		if saved := identityBaseline - len(rctx.SerializedIdentity); saved > 0 {
-			identitySaved = saved
-		}
-	}
-	sess.RecordTurn(tokensSent, identitySaved, contextSaved, baselineThisTurn, rawTurnBytes)
+	sess.RecordTurn(tokensSent, 0)
 
-	slog.Info("turn recorded",
-		"session_id", rctx.ID,
-		"tokens_sent", tokensSent,
-		"identity_saved", identitySaved,
-		"context_saved", contextSaved,
-		"identity_baseline", sess.IdentityBaseline(),
-		"serialized_len", len(rctx.SerializedIdentity),
-	)
+	slog.Debug("request completed", "session_id", rctx.ID, "tokens_sent", tokensSent)
 
 	return Response{
 		SessionID:   rctx.ID,

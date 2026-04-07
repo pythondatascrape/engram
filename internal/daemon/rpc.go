@@ -36,13 +36,11 @@ type HealthResult struct {
 // StatsResult is the response payload for the "stats" method.
 // All token counts are cumulative across all active sessions.
 type StatsResult struct {
-	ActiveSessions      int `json:"active_sessions"`
-	TotalTurns          int `json:"total_turns"`
-	CumulativeBaseline  int `json:"cumulative_baseline"`   // tokens that would have been sent without Engram
-	TokensSent          int `json:"tokens_sent"`           // tokens actually sent
-	TokensSaved         int `json:"tokens_saved"`          // identity tokens saved
-	ContextTokensSaved  int `json:"context_tokens_saved"`  // context/history tokens saved
-	TotalSaved          int `json:"total_saved"`           // tokens_saved + context_tokens_saved
+	ActiveSessions int `json:"active_sessions"`
+	TotalTurns     int `json:"total_turns"`
+	TokensSent     int `json:"tokens_sent"`  // tokens actually sent
+	TokensSaved    int `json:"tokens_saved"` // identity tokens saved
+	TotalSaved     int `json:"total_saved"`  // total tokens saved
 }
 
 // CompressRequest is the params payload for the "compress" method.
