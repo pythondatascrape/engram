@@ -100,6 +100,17 @@ engram install --claude-code   # installs plugin + daemon
 engram status                  # confirm daemon is running
 ```
 
+**Claude Code Skills**
+
+| Skill | Invocation | Description |
+|-------|-----------|-------------|
+| Codebook Manager | `/engram:codebook` | Show, diff, init, or validate your active codebook |
+| Codebook Wizard | `/engram:engram-codebook` | Interactive wizard — builds identity + prompt codebook from scratch, scoped to session, project, or global |
+| Token Report | `/engram:report` | Generate a session token savings report |
+| Settings | `/engram:config` | Edit plugin configuration interactively |
+
+The **Codebook Wizard** (`/engram:engram-codebook`) is the fastest way to wire up compression for a new project. It reads your `CLAUDE.md`, derives identity dimensions, builds a prompt vocabulary from your project's domain language, and writes a `.engram-codebook.yaml` + `engram.yaml` in two minutes. Behavioral dimensions that `derive_codebook` misses from prose-style CLAUDE.md files are pre-populated and reviewable before writing.
+
 ### OpenClaw
 
 ```bash
