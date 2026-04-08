@@ -134,7 +134,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 		return nil, fmt.Errorf("no provider factory configured")
 	})
 
-	handler := server.NewHandler(mgr, ser, nil, p)
+	handler := server.NewHandler(mgr, ser, nil, p, cfg.Proxy.WindowSize)
 
 	// Create daemon listener and server.
 	listener, err := daemon.NewListener(socketPath)
