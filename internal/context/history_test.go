@@ -35,7 +35,7 @@ func TestHistory_AppendAndRender(t *testing.T) {
 	msgs := h.Messages()
 	require.Len(t, msgs, 2) // request + response
 	assert.Equal(t, "user", msgs[0].Role)
-	assert.Contains(t, msgs[0].Content, "role=user")
+	assert.Contains(t, msgs[0].Content, "content=hello")
 	assert.Equal(t, "assistant", msgs[1].Role)
 }
 
