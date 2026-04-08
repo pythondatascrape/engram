@@ -27,7 +27,7 @@ import (
 
 // daemonize re-executes the current binary as a background child process,
 // detached from the terminal, then returns so the parent can exit.
-func daemonize(configPath, socketPath string) error {
+func daemonize(configPath, socketPath string, windowSize int) error {
 	exe, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("resolve executable: %w", err)
@@ -44,7 +44,11 @@ func daemonize(configPath, socketPath string) error {
 		return fmt.Errorf("open log file: %w", err)
 	}
 
-	cmd := exec.Command(exe, "serve", "--foreground", "--config", configPath, "--socket", socketPath)
+	args := []string{"serve", "--foreground", "--config", configPath, "--socket", socketPath}
+	if windowSize > 0 {
+		args = append(args, "--window", fmt.Sprintf("%d", windowSize))
+	}
+	cmd := exec.Command(exe, args...)
 	cmd.Env = append(os.Environ(), daemonChildEnv+"=1")
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
@@ -73,6 +77,7 @@ func newServeCmd() *cobra.Command {
 	cmd.Flags().String("socket", DefaultSocketPath(), "Unix socket path for daemon")
 	cmd.Flags().Bool("install-daemon", false, "Install as a system daemon (launchd/systemd)")
 	cmd.Flags().Bool("foreground", false, "Run in foreground instead of daemonizing")
+	cmd.Flags().Int("window", 0, "Override proxy window size (0 = use config default)")
 	return cmd
 }
 
@@ -85,16 +90,22 @@ func runServe(cmd *cobra.Command, args []string) error {
 	foreground, _ := cmd.Flags().GetBool("foreground")
 	configPath, _ := cmd.Flags().GetString("config")
 	socketPath, _ := cmd.Flags().GetString("socket")
+	windowSize, _ := cmd.Flags().GetInt("window")
 
 	// Daemonize unless --foreground or already a child process.
 	if !foreground && os.Getenv(daemonChildEnv) == "" {
-		return daemonize(configPath, socketPath)
+		return daemonize(configPath, socketPath, windowSize)
 	}
 
 	// Load configuration.
 	cfg, err := config.Load(configPath)
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
+	}
+
+	// CLI --window overrides config file value.
+	if windowOverride, _ := cmd.Flags().GetInt("window"); windowOverride > 0 {
+		cfg.Proxy.WindowSize = windowOverride
 	}
 
 	// Set up structured logging.
