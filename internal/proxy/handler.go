@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 )
 
@@ -74,9 +75,40 @@ func (h *Handler) claimPendingSession() string {
 
 // anthropicRequest is the subset of the Anthropic messages request we care about.
 type anthropicRequest struct {
-	Messages []AnthropicMessage `json:"messages"`
-	System   string             `json:"system"`
-	Stream   bool               `json:"stream"`
+	Messages  []AnthropicMessage `json:"messages"`
+	RawSystem json.RawMessage    `json:"system"`
+	System    string             `json:"-"` // extracted text from RawSystem
+	Stream    bool               `json:"stream"`
+}
+
+// extractSystem populates the System string field from RawSystem, handling
+// both the plain string form and the content-block array form used by Claude Code:
+//
+//	"system": "text"
+//	"system": [{"type":"text","text":"..."},...]
+func (r *anthropicRequest) extractSystem() {
+	if r.RawSystem == nil {
+		return
+	}
+	// Try plain string first.
+	var s string
+	if json.Unmarshal(r.RawSystem, &s) == nil {
+		r.System = s
+		return
+	}
+	// Try array of content blocks.
+	var blocks []struct {
+		Text string `json:"text"`
+	}
+	if json.Unmarshal(r.RawSystem, &blocks) == nil {
+		var parts []string
+		for _, b := range blocks {
+			if b.Text != "" {
+				parts = append(parts, b.Text)
+			}
+		}
+		r.System = strings.Join(parts, "\n")
+	}
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -122,6 +154,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.forwardVerbatim(w, r, rawBody)
 		return
 	}
+	req.extractSystem()
 
 	// Determine session ID. Prefer the UUID registered by the sessionstart hook
 	// (via /internal/register-session). Fall back to the system-prompt fingerprint

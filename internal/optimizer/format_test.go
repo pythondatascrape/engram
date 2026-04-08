@@ -60,6 +60,21 @@ func TestFormatStatuslineSideBySide_SubKContext(t *testing.T) {
 	assert.Contains(t, out, "729")
 }
 
+func TestFormatStatuslineSideBySide_UsesRawContextPercent(t *testing.T) {
+	var buf bytes.Buffer
+	d := StatuslineData{Orig: 75, Comp: 4, Saved: 71, Live: true}
+	ctx := ContextData{Orig: 2000, Comp: 444}
+	FormatStatuslineSideBySide(&buf, d, ctx)
+	out := buf.String()
+
+	// 2000 -> 2K and 444 -> 444, but the percentage must still be computed
+	// from raw values: (2000-444)/2000 = 77% with integer truncation.
+	assert.Contains(t, out, "2K")
+	assert.Contains(t, out, "444")
+	assert.Contains(t, out, "77%")
+	assert.NotContains(t, out, "100%")
+}
+
 func TestFormatReport_ContainsAllSections(t *testing.T) {
 	report := &SavingsReport{
 		Items: []SavingsItem{
