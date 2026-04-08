@@ -45,7 +45,7 @@ func daemonize(configPath, socketPath string, windowSize int) error {
 	}
 
 	args := []string{"serve", "--foreground", "--config", configPath, "--socket", socketPath}
-	if windowSize > 0 {
+	if windowSize >= 0 {
 		args = append(args, "--window", fmt.Sprintf("%d", windowSize))
 	}
 	cmd := exec.Command(exe, args...)
@@ -77,7 +77,7 @@ func newServeCmd() *cobra.Command {
 	cmd.Flags().String("socket", DefaultSocketPath(), "Unix socket path for daemon")
 	cmd.Flags().Bool("install-daemon", false, "Install as a system daemon (launchd/systemd)")
 	cmd.Flags().Bool("foreground", false, "Run in foreground instead of daemonizing")
-	cmd.Flags().Int("window", 0, "Override proxy window size (0 = use config default)")
+	cmd.Flags().Int("window", -1, "Override proxy window size (0 = disable compression)")
 	return cmd
 }
 
@@ -103,9 +103,9 @@ func runServe(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("load config: %w", err)
 	}
 
-	// CLI --window overrides config file value.
-	if windowOverride, _ := cmd.Flags().GetInt("window"); windowOverride > 0 {
-		cfg.Proxy.WindowSize = windowOverride
+	// CLI --window overrides config file value. -1 means "not set."
+	if windowSize >= 0 {
+		cfg.Proxy.WindowSize = windowSize
 	}
 
 	// Set up structured logging.
