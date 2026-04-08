@@ -329,3 +329,49 @@ func TestRegisterSessionGetFallsThrough(t *testing.T) {
 		t.Fatalf("got %d, want 200 (proxied through)", rec.Code)
 	}
 }
+
+func TestStatsIncludeSystemPrompt(t *testing.T) {
+	srv, _ := fakeAnthropic(t)
+	defer srv.Close()
+
+	dir := t.TempDir()
+	done := make(chan struct{}, 1)
+	h := NewHandler(5, dir, srv.URL)
+	h.afterStats = func() { done <- struct{}{} }
+
+	// System prompt of 400 chars → ~100 tokens.
+	system := strings.Repeat("a", 400)
+	// 3 messages (below window, no compression) with ~40 chars each → ~10 tokens each.
+	msgs := []AnthropicMessage{
+		{Role: "user", Content: strings.Repeat("b", 40)},
+		{Role: "assistant", Content: strings.Repeat("c", 40)},
+		{Role: "user", Content: strings.Repeat("d", 40)},
+	}
+
+	postMessages(t, h, msgs, system, map[string]string{
+		"X-Engram-Session": "sysprompt-test",
+	})
+	<-done
+
+	data, err := os.ReadFile(filepath.Join(dir, "sysprompt-test.ctx.json"))
+	if err != nil {
+		t.Fatalf("read stats file: %v", err)
+	}
+
+	var stats struct {
+		CtxOrig int `json:"ctx_orig"`
+		CtxComp int `json:"ctx_comp"`
+	}
+	if err := json.Unmarshal(data, &stats); err != nil {
+		t.Fatalf("parse stats: %v", err)
+	}
+
+	// Without system prompt: ~30 tokens (3 msgs * 10 tokens each).
+	// With system prompt: ~130 tokens (30 + 100).
+	if stats.CtxOrig < 100 {
+		t.Errorf("ctxOrig should include system prompt tokens; got %d, want >= 100", stats.CtxOrig)
+	}
+	if stats.CtxComp < 100 {
+		t.Errorf("ctxComp should include system prompt tokens; got %d, want >= 100", stats.CtxComp)
+	}
+}

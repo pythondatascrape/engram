@@ -138,9 +138,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Measure before and after compression.
-	ctxOrig := EstimateTokens(req.Messages)
+	// Include the system prompt in token estimates — it's the largest payload
+	// component but is not compressed by the proxy.
+	systemTokens := len(req.System) / 4
+	ctxOrig := EstimateTokens(req.Messages) + systemTokens
 	req.Messages = Compress(req.Messages, h.windowSize)
-	ctxComp := EstimateTokens(req.Messages)
+	ctxComp := EstimateTokens(req.Messages) + systemTokens
 
 	// Re-encode.
 	newBody, err := json.Marshal(req)
