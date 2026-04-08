@@ -3,12 +3,15 @@ package proxy
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
 	"strings"
 	"sync"
+
+	"github.com/pythondatascrape/engram/internal/smc"
 )
 
 // engramSessionHeader is the request header used to pass the session ID from
@@ -38,6 +41,15 @@ type Handler struct {
 	// gets its request in first will use the registered UUID.
 	pendingMu      sync.Mutex
 	pendingSession string
+
+	// SMC fields — when smcEnabled is true, use matrix decomposition instead of
+	// windowed compression.
+	smcEnabled    bool
+	smcSchema     smc.CategorySchema
+	smcK          smc.KController
+	smcDecomposer smc.Decomposer
+	smcMatrices   map[string]*smc.ConversationMatrix // sessionID -> matrix
+	smcMu         sync.Mutex
 }
 
 // NewHandler creates a new Handler.
@@ -175,7 +187,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// component but is not compressed by the proxy.
 	systemTokens := len(req.System) / 4
 	ctxOrig := EstimateTokens(req.Messages) + systemTokens
-	req.Messages = Compress(req.Messages, h.windowSize)
+	if h.smcEnabled {
+		req.Messages = h.smcCompress(sessionID, req.Messages)
+	} else {
+		req.Messages = Compress(req.Messages, h.windowSize)
+	}
 	ctxComp := EstimateTokens(req.Messages) + systemTokens
 
 	// Re-encode.
@@ -256,4 +272,80 @@ func (h *Handler) forwardWithBody(w http.ResponseWriter, r *http.Request, body [
 			break
 		}
 	}
+}
+
+// EnableSMC activates structured matrix compression, replacing windowed compression.
+func (h *Handler) EnableSMC(schema smc.CategorySchema, k smc.KController) {
+	h.smcEnabled = true
+	h.smcSchema = schema
+	h.smcK = k
+	h.smcDecomposer = smc.NewRuleDecomposer(k)
+	h.smcMatrices = make(map[string]*smc.ConversationMatrix)
+}
+
+// getOrCreateMatrix returns the conversation matrix for a session, creating one if needed.
+func (h *Handler) getOrCreateMatrix(sessionID string) *smc.ConversationMatrix {
+	h.smcMu.Lock()
+	defer h.smcMu.Unlock()
+	m, ok := h.smcMatrices[sessionID]
+	if !ok {
+		m = smc.NewConversationMatrix(sessionID, h.smcSchema, h.smcK)
+		h.smcMatrices[sessionID] = m
+	}
+	return m
+}
+
+// smcCompress decomposes older messages into the matrix and returns
+// the matrix history + recent raw messages.
+func (h *Handler) smcCompress(sessionID string, messages []AnthropicMessage) []AnthropicMessage {
+	if len(messages) <= 2 {
+		return messages
+	}
+
+	matrix := h.getOrCreateMatrix(sessionID)
+
+	// Decompose all completed exchanges (pairs) except the last pair.
+	alreadyDecomposed := matrix.Len()
+	pairs := len(messages) / 2
+	currentTail := messages[pairs*2:]
+
+	for i := alreadyDecomposed; i < pairs; i++ {
+		userIdx := i * 2
+		assistIdx := i*2 + 1
+		if assistIdx >= len(messages) {
+			break
+		}
+		exchange := smc.Exchange{
+			UserMessage:      messageText(messages[userIdx]),
+			AssistantMessage: messageText(messages[assistIdx]),
+			TurnIndex:        i,
+		}
+		row, err := h.smcDecomposer.Decompose(context.Background(), exchange, h.smcSchema)
+		if err != nil {
+			slog.Warn("smc: decomposition failed, keeping raw", "turn", i, "err", err)
+			continue
+		}
+		matrix.Append(*row)
+	}
+
+	// Build output: matrix history messages + current raw tail
+	matrixMsgs := matrix.Messages()
+	result := make([]AnthropicMessage, 0, len(matrixMsgs)+len(currentTail)+2)
+
+	for _, m := range matrixMsgs {
+		result = append(result, AnthropicMessage{Role: m.Role, Content: m.Content})
+	}
+	if len(result) > 0 {
+		result = append(result, AnthropicMessage{Role: "assistant", Content: "[compressed history above]"})
+	}
+
+	// Append the current raw tail
+	if pairs > 0 && alreadyDecomposed < pairs {
+		lastPairStart := (pairs - 1) * 2
+		result = append(result, messages[lastPairStart:]...)
+	} else {
+		result = append(result, currentTail...)
+	}
+
+	return result
 }

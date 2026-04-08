@@ -3,6 +3,7 @@ package proxy
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -10,6 +11,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/pythondatascrape/engram/internal/smc"
 )
 
 // fakeAnthropic returns a minimal non-streaming Anthropic response and
@@ -435,5 +438,47 @@ func TestSystemArrayCountsTokensAndFingerprintFallback(t *testing.T) {
 	}
 	if stats.CtxComp < 100 {
 		t.Fatalf("ctxComp should include array-form system prompt tokens; got %d", stats.CtxComp)
+	}
+}
+
+func TestHandler_SMCCompression(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(200)
+		json.NewEncoder(w).Encode(map[string]any{
+			"content": []map[string]string{{"text": "ok", "type": "text"}},
+			"role":    "assistant",
+		})
+	}))
+	defer upstream.Close()
+
+	schema := smc.DefaultSchema()
+	kc := smc.NewKController(0.5, schema)
+	h := NewHandler(10, t.TempDir(), upstream.URL)
+	h.EnableSMC(schema, kc)
+
+	messages := make([]AnthropicMessage, 20)
+	for i := range messages {
+		if i%2 == 0 {
+			messages[i] = AnthropicMessage{Role: "user", Content: fmt.Sprintf("Please update file%d.go to add logging", i)}
+		} else {
+			messages[i] = AnthropicMessage{Role: "assistant", Content: fmt.Sprintf("Updated file%d.go with slog calls", i)}
+		}
+	}
+
+	body, _ := json.Marshal(map[string]any{
+		"messages": messages,
+		"system":   "You are a helpful assistant.",
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(string(body)))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("x-api-key", "test-key")
+
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+
+	if rr.Code != 200 {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
 	}
 }
