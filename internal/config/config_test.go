@@ -214,3 +214,35 @@ func TestParseSize(t *testing.T) {
 		})
 	}
 }
+
+func TestDefaults_SMCConfig(t *testing.T) {
+	cfg, err := config.Load(writeTempYAML(t, "{}"))
+	require.NoError(t, err)
+
+	assert.Equal(t, 0.5, cfg.Proxy.SMC.K, "default global k")
+	assert.False(t, cfg.Proxy.SMC.AutoK, "auto_k off by default")
+	assert.Len(t, cfg.Proxy.SMC.Categories, 4, "default 4 categories")
+	assert.Equal(t, "intent", cfg.Proxy.SMC.Categories[0].Name)
+	assert.True(t, cfg.Proxy.SMC.CrossRefs, "cross_refs on by default")
+}
+
+func TestLoad_SMCCustomCategories(t *testing.T) {
+	yaml := `
+proxy:
+  smc:
+    k: 0.3
+    categories:
+      - name: diagnosis
+        description: "medical diagnosis"
+        k: 0.2
+      - name: treatment
+        description: "treatment plan"
+        k: 0.7
+`
+	cfg, err := config.Load(writeTempYAML(t, yaml))
+	require.NoError(t, err)
+	assert.Equal(t, 0.3, cfg.Proxy.SMC.K)
+	assert.Len(t, cfg.Proxy.SMC.Categories, 2)
+	assert.Equal(t, "diagnosis", cfg.Proxy.SMC.Categories[0].Name)
+	assert.Equal(t, 0.2, cfg.Proxy.SMC.Categories[0].K)
+}
