@@ -154,9 +154,25 @@ type LoggingConfig struct {
 	RedactQueries  bool   `yaml:"redact_queries"`
 }
 
+// SMCCategoryConfig mirrors smc.Category for YAML deserialization.
+type SMCCategoryConfig struct {
+	Name        string  `yaml:"name"`
+	Description string  `yaml:"description"`
+	K           float64 `yaml:"k"`
+}
+
+// SMCConfig holds Structured Matrix Compression settings.
+type SMCConfig struct {
+	K          float64             `yaml:"k"`
+	AutoK      bool                `yaml:"auto_k"`
+	CrossRefs  bool                `yaml:"cross_refs"`
+	Categories []SMCCategoryConfig `yaml:"categories"`
+}
+
 type ProxyConfig struct {
-	Port       int `yaml:"port"`
-	WindowSize int `yaml:"window_size"`
+	Port       int       `yaml:"port"`
+	WindowSize int       `yaml:"window_size"`
+	SMC        SMCConfig `yaml:"smc"`
 }
 
 // Load reads the YAML file at path, applies defaults, applies env overrides,
@@ -329,6 +345,16 @@ func defaults() *Config {
 		Proxy: ProxyConfig{
 			Port:       4242,
 			WindowSize: 10,
+			SMC: SMCConfig{
+				K:         0.5,
+				CrossRefs: true,
+				Categories: []SMCCategoryConfig{
+					{Name: "intent", Description: "What the speaker wants or is doing — semantic purpose, goals, directives", K: -1},
+					{Name: "entities", Description: "Files, functions, concepts referenced — concrete nouns, identifiers, domain objects", K: -1},
+					{Name: "mutations", Description: "What changed — code diffs, state transitions, decisions, commitments", K: -1},
+					{Name: "context", Description: "Reasoning, constraints, rationale — the 'why' behind actions and decisions", K: -1},
+				},
+			},
 		},
 	}
 }

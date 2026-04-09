@@ -49,6 +49,7 @@ type Handler struct {
 	codebook   *codebook.Codebook
 	pool       *pool.Pool
 	detector   *security.InjectionDetector
+	windowSize int
 }
 
 // NewHandler constructs a Handler with its dependencies.
@@ -57,12 +58,14 @@ func NewHandler(
 	ser *serializer.Serializer,
 	cb *codebook.Codebook,
 	p *pool.Pool,
+	windowSize int,
 ) *Handler {
 	return &Handler{
 		sessions:   sessions,
 		serializer: ser,
 		codebook:   cb,
 		pool:       p,
+		windowSize: windowSize,
 	}
 }
 
@@ -72,6 +75,7 @@ func NewHandlerWithSecurity(
 	ser *serializer.Serializer,
 	cb *codebook.Codebook,
 	p *pool.Pool,
+	windowSize int,
 	det *security.InjectionDetector,
 ) *Handler {
 	return &Handler{
@@ -79,6 +83,7 @@ func NewHandlerWithSecurity(
 		serializer: ser,
 		codebook:   cb,
 		pool:       p,
+		windowSize: windowSize,
 		detector:   det,
 	}
 }
@@ -157,10 +162,17 @@ func (h *Handler) HandleRequest(ctx context.Context, req IncomingRequest) (Respo
 		histMsgs = rctx.History.Messages()
 	}
 
+	// Inject codebook definitions on turn 0 and every windowSize turns thereafter.
+	// This aligns with the proxy's compression window — when old turns are rolled
+	// into [CONTEXT_SUMMARY], the definitions are re-injected so the LLM can still
+	// decode the remaining compressed history entries.
 	var ctxCodebookDef, respCodebookDef string
 	if rctx.ContextCodebook != nil {
-		ctxCodebookDef = rctx.ContextCodebook.Definition()
-		respCodebookDef = engramctx.AnthropicResponseCodebook().Definition()
+		injectDefs := h.windowSize < 2 || sess.Snapshot().Turns%h.windowSize == 0
+		if injectDefs {
+			ctxCodebookDef = rctx.ContextCodebook.Definition()
+			respCodebookDef = engramctx.AnthropicResponseCodebook().Definition()
+		}
 	}
 
 	prompt := AssemblePrompt(PromptParts{

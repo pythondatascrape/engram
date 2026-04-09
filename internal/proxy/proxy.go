@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+
+	"github.com/pythondatascrape/engram/internal/smc"
 )
 
 // Server wraps the HTTP proxy with lifecycle management.
@@ -43,6 +45,13 @@ func (s *Server) Start() error {
 // Stop gracefully shuts down the server with the given context.
 func (s *Server) Stop(ctx context.Context) error {
 	return s.srv.Shutdown(ctx)
+}
+
+// EnableSMC activates structured matrix compression on the underlying handler.
+func (s *Server) EnableSMC(schema smc.CategorySchema, k smc.KController) {
+	if h, ok := s.srv.Handler.(*Handler); ok {
+		h.EnableSMC(schema, k)
+	}
 }
 
 // Addr returns the effective address the server is listening on after Start.

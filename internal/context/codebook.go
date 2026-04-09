@@ -9,9 +9,10 @@ import (
 
 // ContextCodebook holds a derived codebook for compressing conversation turns.
 type ContextCodebook struct {
-	Name   string
-	keys   []string          // sorted field names from schema
-	schema map[string]string // field name → type hint (stored for Definition())
+	Name     string
+	keys     []string          // sorted field names from schema
+	schema   map[string]string // field name → type hint (stored for Definition())
+	defaults map[string]string // enum field → first value (the default)
 }
 
 // DeriveCodebook derives a ContextCodebook from a schema map.
@@ -34,7 +35,25 @@ func DeriveCodebook(name string, schema map[string]string) (*ContextCodebook, er
 	for k, v := range schema {
 		schemaCopy[k] = v
 	}
-	return &ContextCodebook{Name: name, keys: keys, schema: schemaCopy}, nil
+	defaults := make(map[string]string)
+	for k, v := range schemaCopy {
+		if strings.HasPrefix(v, "enum:") {
+			values := strings.SplitN(strings.TrimPrefix(v, "enum:"), ",", 2)
+			if len(values) > 0 && values[0] != "" {
+				defaults[k] = values[0]
+			}
+		}
+	}
+	return &ContextCodebook{Name: name, keys: keys, schema: schemaCopy, defaults: defaults}, nil
+}
+
+// Defaults returns a copy of the enum default values map.
+func (c *ContextCodebook) Defaults() map[string]string {
+	out := make(map[string]string, len(c.defaults))
+	for k, v := range c.defaults {
+		out[k] = v
+	}
+	return out
 }
 
 // Keys returns the sorted field names in this codebook.
@@ -58,6 +77,9 @@ func (c *ContextCodebook) SerializeTurn(turn map[string]string) (string, error) 
 	for _, k := range c.keys {
 		v, ok := turn[k]
 		if !ok {
+			continue
+		}
+		if def, hasDef := c.defaults[k]; hasDef && v == def {
 			continue
 		}
 		if !first {
@@ -84,7 +106,17 @@ func (c *ContextCodebook) Definition() string {
 		}
 		b.WriteString(k)
 		b.WriteByte('(')
-		b.WriteString(c.schema[k])
+
+		typeHint := c.schema[k]
+		if def, ok := c.defaults[k]; ok && strings.HasPrefix(typeHint, "enum:") {
+			enumPart := strings.TrimPrefix(typeHint, "enum:")
+			enumPart = strings.Replace(enumPart, def, def+"*", 1)
+			b.WriteString("enum:")
+			b.WriteString(enumPart)
+		} else {
+			b.WriteString(typeHint)
+		}
+
 		b.WriteByte(')')
 	}
 	return b.String()

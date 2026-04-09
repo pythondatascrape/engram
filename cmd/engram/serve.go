@@ -19,6 +19,7 @@ import (
 	"github.com/pythondatascrape/engram/internal/provider"
 	"github.com/pythondatascrape/engram/internal/provider/pool"
 	"github.com/pythondatascrape/engram/internal/proxy"
+	"github.com/pythondatascrape/engram/internal/smc"
 	"github.com/pythondatascrape/engram/internal/server"
 	"github.com/pythondatascrape/engram/internal/session"
 	"github.com/pythondatascrape/engram/internal/updater"
@@ -27,7 +28,7 @@ import (
 
 // daemonize re-executes the current binary as a background child process,
 // detached from the terminal, then returns so the parent can exit.
-func daemonize(configPath, socketPath string) error {
+func daemonize(configPath, socketPath string, windowSize int) error {
 	exe, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("resolve executable: %w", err)
@@ -44,7 +45,11 @@ func daemonize(configPath, socketPath string) error {
 		return fmt.Errorf("open log file: %w", err)
 	}
 
-	cmd := exec.Command(exe, "serve", "--foreground", "--config", configPath, "--socket", socketPath)
+	args := []string{"serve", "--foreground", "--config", configPath, "--socket", socketPath}
+	if windowSize >= 0 {
+		args = append(args, "--window", fmt.Sprintf("%d", windowSize))
+	}
+	cmd := exec.Command(exe, args...)
 	cmd.Env = append(os.Environ(), daemonChildEnv+"=1")
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
@@ -73,6 +78,8 @@ func newServeCmd() *cobra.Command {
 	cmd.Flags().String("socket", DefaultSocketPath(), "Unix socket path for daemon")
 	cmd.Flags().Bool("install-daemon", false, "Install as a system daemon (launchd/systemd)")
 	cmd.Flags().Bool("foreground", false, "Run in foreground instead of daemonizing")
+	cmd.Flags().Int("window", -1, "Override proxy window size (0 = disable compression)")
+	cmd.Flags().Float64("k", -1, "SMC k-parameter (0-1); overrides config file smc.k")
 	return cmd
 }
 
@@ -85,16 +92,22 @@ func runServe(cmd *cobra.Command, args []string) error {
 	foreground, _ := cmd.Flags().GetBool("foreground")
 	configPath, _ := cmd.Flags().GetString("config")
 	socketPath, _ := cmd.Flags().GetString("socket")
+	windowSize, _ := cmd.Flags().GetInt("window")
 
 	// Daemonize unless --foreground or already a child process.
 	if !foreground && os.Getenv(daemonChildEnv) == "" {
-		return daemonize(configPath, socketPath)
+		return daemonize(configPath, socketPath, windowSize)
 	}
 
 	// Load configuration.
 	cfg, err := config.Load(configPath)
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
+	}
+
+	// CLI --window overrides config file value. -1 means "not set."
+	if windowSize >= 0 {
+		cfg.Proxy.WindowSize = windowSize
 	}
 
 	// Set up structured logging.
@@ -134,7 +147,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 		return nil, fmt.Errorf("no provider factory configured")
 	})
 
-	handler := server.NewHandler(mgr, ser, nil, p)
+	handler := server.NewHandler(mgr, ser, nil, p, cfg.Proxy.WindowSize)
 
 	// Create daemon listener and server.
 	listener, err := daemon.NewListener(socketPath)
@@ -157,6 +170,17 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	sessionsDir := DefaultSessionsDir()
 	proxySrv := proxy.New(cfg.Proxy.Port, cfg.Proxy.WindowSize, sessionsDir, "https://api.anthropic.com")
+
+	// Enable SMC on the proxy handler if configured
+	smcCfg := cfg.Proxy.SMC
+	kOverride, _ := cmd.Flags().GetFloat64("k")
+	if kOverride >= 0 {
+		smcCfg.K = kOverride
+	}
+	smcSchema := configToSMCSchema(smcCfg)
+	smcK := smc.NewKController(smcCfg.K, smcSchema)
+	proxySrv.EnableSMC(smcSchema, smcK)
+
 	if err := proxySrv.Start(); err != nil {
 		return fmt.Errorf("start proxy on :%d: %w", cfg.Proxy.Port, err)
 	}
@@ -193,4 +217,19 @@ func runServe(cmd *cobra.Command, args []string) error {
 	srv.Stop()
 	slog.Info("engram daemon stopped")
 	return nil
+}
+
+func configToSMCSchema(cfg config.SMCConfig) smc.CategorySchema {
+	cats := make([]smc.Category, len(cfg.Categories))
+	for i, c := range cfg.Categories {
+		cats[i] = smc.Category{
+			Name:        c.Name,
+			Description: c.Description,
+			K:           c.K,
+		}
+	}
+	return smc.CategorySchema{
+		Categories: cats,
+		CrossRefs:  cfg.CrossRefs,
+	}
 }

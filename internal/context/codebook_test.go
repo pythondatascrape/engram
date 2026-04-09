@@ -50,6 +50,39 @@ func TestDeriveCodebook(t *testing.T) {
 	}
 }
 
+func TestDeriveCodebook_ParsesEnumDefaults(t *testing.T) {
+	schema := map[string]string{
+		"role":    "enum:user,assistant",
+		"content": "text",
+	}
+	cb, err := engramctx.DeriveCodebook("app", schema)
+	require.NoError(t, err)
+
+	defaults := cb.Defaults()
+	assert.Equal(t, "user", defaults["role"])
+	assert.Empty(t, defaults["content"], "text fields should have no default")
+}
+
+func TestDeriveCodebook_NoEnumNoDefaults(t *testing.T) {
+	schema := map[string]string{"content": "text", "city": "text"}
+	cb, err := engramctx.DeriveCodebook("app", schema)
+	require.NoError(t, err)
+	assert.Empty(t, cb.Defaults())
+}
+
+func TestDeriveCodebook_MultipleEnums(t *testing.T) {
+	schema := map[string]string{
+		"role":   "enum:user,assistant,tool",
+		"status": "enum:active,inactive",
+	}
+	cb, err := engramctx.DeriveCodebook("app", schema)
+	require.NoError(t, err)
+
+	defaults := cb.Defaults()
+	assert.Equal(t, "user", defaults["role"])
+	assert.Equal(t, "active", defaults["status"])
+}
+
 func TestSerializeTurn(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -57,19 +90,53 @@ func TestSerializeTurn(t *testing.T) {
 		turn         map[string]string
 		wantErr      bool
 		wantContains []string
+		wantOmit     []string
+		wantExact    string
+		checkExact   bool
 	}{
 		{
-			name:         "RoundTrip",
+			name:         "OmitsDefaultEnum",
 			schema:       map[string]string{"role": "enum:user,assistant", "content": "text"},
 			turn:         map[string]string{"role": "user", "content": "What flights are available?"},
 			wantErr:      false,
-			wantContains: []string{"role=user", "content=What flights are available?"},
+			wantContains: []string{"content=What flights are available?"},
+			wantOmit:     []string{"role=user"},
 		},
 		{
 			name:    "UnknownField",
 			schema:  map[string]string{"role": "text"},
 			turn:    map[string]string{"role": "user", "unknown": "val"},
 			wantErr: true,
+		},
+		{
+			name:         "IncludesNonDefaultEnum",
+			schema:       map[string]string{"role": "enum:user,assistant", "content": "text"},
+			turn:         map[string]string{"role": "assistant", "content": "Here are the flights"},
+			wantErr:      false,
+			wantContains: []string{"role=assistant", "content=Here are the flights"},
+		},
+		{
+			name:       "AllDefaultsEmptyOutput",
+			schema:     map[string]string{"role": "enum:user,assistant"},
+			turn:       map[string]string{"role": "user"},
+			wantErr:    false,
+			wantExact:  "",
+			checkExact: true,
+		},
+		{
+			name:         "MixedDefaultAndNonDefault",
+			schema:       map[string]string{"role": "enum:user,assistant", "status": "enum:active,inactive", "content": "text"},
+			turn:         map[string]string{"role": "user", "status": "inactive", "content": "hello"},
+			wantErr:      false,
+			wantContains: []string{"status=inactive", "content=hello"},
+			wantOmit:     []string{"role=user"},
+		},
+		{
+			name:         "TextFieldNeverOmitted",
+			schema:       map[string]string{"content": "text"},
+			turn:         map[string]string{"content": "hello"},
+			wantErr:      false,
+			wantContains: []string{"content=hello"},
 		},
 	}
 
@@ -84,8 +151,14 @@ func TestSerializeTurn(t *testing.T) {
 				return
 			}
 			require.NoError(t, err)
+			if tt.checkExact {
+				assert.Equal(t, tt.wantExact, compressed)
+			}
 			for _, want := range tt.wantContains {
 				assert.Contains(t, compressed, want)
+			}
+			for _, omit := range tt.wantOmit {
+				assert.NotContains(t, compressed, omit)
 			}
 		})
 	}
@@ -103,4 +176,27 @@ func TestDefinition_ContainsAllKeys(t *testing.T) {
 	assert.Contains(t, def, "role")
 	assert.Contains(t, def, "content")
 	assert.Contains(t, def, "city")
+}
+
+func TestDefinition_MarksDefaults(t *testing.T) {
+	schema := map[string]string{
+		"role":    "enum:user,assistant",
+		"content": "text",
+	}
+	cb, err := engramctx.DeriveCodebook("app", schema)
+	require.NoError(t, err)
+	def := cb.Definition()
+
+	assert.Contains(t, def, "role(enum:user*,assistant)")
+	assert.Contains(t, def, "content(text)")
+	assert.NotContains(t, def, "content(text*")
+}
+
+func TestDefinition_NoDefaultNoMarker(t *testing.T) {
+	schema := map[string]string{"content": "text", "city": "text"}
+	cb, err := engramctx.DeriveCodebook("app", schema)
+	require.NoError(t, err)
+	def := cb.Definition()
+
+	assert.NotContains(t, def, "*")
 }

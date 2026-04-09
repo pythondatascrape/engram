@@ -3,6 +3,7 @@ package proxy
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -10,6 +11,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/pythondatascrape/engram/internal/smc"
 )
 
 // fakeAnthropic returns a minimal non-streaming Anthropic response and
@@ -54,6 +57,19 @@ func postMessages(t *testing.T, handler http.Handler, msgs []AnthropicMessage, s
 	}
 	b, _ := json.Marshal(body)
 	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(string(b)))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer sk-test")
+	for k, v := range extraHeaders {
+		req.Header.Set(k, v)
+	}
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	return w.Result()
+}
+
+func postRawBody(t *testing.T, handler http.Handler, body string, extraHeaders map[string]string) *http.Response {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer sk-test")
 	for k, v := range extraHeaders {
@@ -327,5 +343,142 @@ func TestRegisterSessionGetFallsThrough(t *testing.T) {
 	// The fake Anthropic server returns 200 for any request it receives.
 	if rec.Code != http.StatusOK {
 		t.Fatalf("got %d, want 200 (proxied through)", rec.Code)
+	}
+}
+
+func TestStatsIncludeSystemPrompt(t *testing.T) {
+	srv, _ := fakeAnthropic(t)
+	defer srv.Close()
+
+	dir := t.TempDir()
+	done := make(chan struct{}, 1)
+	h := NewHandler(5, dir, srv.URL)
+	h.afterStats = func() { done <- struct{}{} }
+
+	// System prompt of 400 chars → ~100 tokens.
+	system := strings.Repeat("a", 400)
+	// 3 messages (below window, no compression) with ~40 chars each → ~10 tokens each.
+	msgs := []AnthropicMessage{
+		{Role: "user", Content: strings.Repeat("b", 40)},
+		{Role: "assistant", Content: strings.Repeat("c", 40)},
+		{Role: "user", Content: strings.Repeat("d", 40)},
+	}
+
+	postMessages(t, h, msgs, system, map[string]string{
+		"X-Engram-Session": "sysprompt-test",
+	})
+	<-done
+
+	data, err := os.ReadFile(filepath.Join(dir, "sysprompt-test.ctx.json"))
+	if err != nil {
+		t.Fatalf("read stats file: %v", err)
+	}
+
+	var stats struct {
+		CtxOrig int `json:"ctx_orig"`
+		CtxComp int `json:"ctx_comp"`
+	}
+	if err := json.Unmarshal(data, &stats); err != nil {
+		t.Fatalf("parse stats: %v", err)
+	}
+
+	// Without system prompt: ~30 tokens (3 msgs * 10 tokens each).
+	// With system prompt: ~130 tokens (30 + 100).
+	if stats.CtxOrig < 100 {
+		t.Errorf("ctxOrig should include system prompt tokens; got %d, want >= 100", stats.CtxOrig)
+	}
+	if stats.CtxComp < 100 {
+		t.Errorf("ctxComp should include system prompt tokens; got %d, want >= 100", stats.CtxComp)
+	}
+}
+
+func TestSystemArrayCountsTokensAndFingerprintFallback(t *testing.T) {
+	srv, _ := fakeAnthropic(t)
+	defer srv.Close()
+
+	dir := t.TempDir()
+	done := make(chan struct{}, 1)
+	h := NewHandler(10, dir, srv.URL)
+	h.afterStats = func() { done <- struct{}{} }
+
+	systemTextA := strings.Repeat("a", 200)
+	systemTextB := strings.Repeat("b", 200)
+	body := `{
+		"messages":[{"role":"user","content":"hello"}],
+		"system":[
+			{"type":"text","text":"` + systemTextA + `"},
+			{"type":"text","text":"` + systemTextB + `"}
+		],
+		"stream":false
+	}`
+
+	resp := postRawBody(t, h, body, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+	<-done
+
+	expectedID := SessionID(systemTextA + "\n" + systemTextB)
+	data, err := os.ReadFile(filepath.Join(dir, expectedID+".ctx.json"))
+	if err != nil {
+		t.Fatalf("read stats file: %v", err)
+	}
+
+	var stats struct {
+		CtxOrig int `json:"ctx_orig"`
+		CtxComp int `json:"ctx_comp"`
+	}
+	if err := json.Unmarshal(data, &stats); err != nil {
+		t.Fatalf("parse stats: %v", err)
+	}
+
+	// 400 chars of system prompt should contribute about 100 tokens, plus the user message.
+	if stats.CtxOrig < 100 {
+		t.Fatalf("ctxOrig should include array-form system prompt tokens; got %d", stats.CtxOrig)
+	}
+	if stats.CtxComp < 100 {
+		t.Fatalf("ctxComp should include array-form system prompt tokens; got %d", stats.CtxComp)
+	}
+}
+
+func TestHandler_SMCCompression(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(200)
+		json.NewEncoder(w).Encode(map[string]any{
+			"content": []map[string]string{{"text": "ok", "type": "text"}},
+			"role":    "assistant",
+		})
+	}))
+	defer upstream.Close()
+
+	schema := smc.DefaultSchema()
+	kc := smc.NewKController(0.5, schema)
+	h := NewHandler(10, t.TempDir(), upstream.URL)
+	h.EnableSMC(schema, kc)
+
+	messages := make([]AnthropicMessage, 20)
+	for i := range messages {
+		if i%2 == 0 {
+			messages[i] = AnthropicMessage{Role: "user", Content: fmt.Sprintf("Please update file%d.go to add logging", i)}
+		} else {
+			messages[i] = AnthropicMessage{Role: "assistant", Content: fmt.Sprintf("Updated file%d.go with slog calls", i)}
+		}
+	}
+
+	body, _ := json.Marshal(map[string]any{
+		"messages": messages,
+		"system":   "You are a helpful assistant.",
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(string(body)))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("x-api-key", "test-key")
+
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+
+	if rr.Code != 200 {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
 	}
 }

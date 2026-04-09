@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -72,7 +73,7 @@ func newTestDeps(t *testing.T) (*session.Manager, *serializer.Serializer, *codeb
 
 func TestHandleRequest_FirstRequest_CreatesSession(t *testing.T) {
 	mgr, ser, cb, p := newTestDeps(t)
-	h := NewHandler(mgr, ser, cb, p)
+	h := NewHandler(mgr, ser, cb, p, 10)
 
 	req := IncomingRequest{
 		ClientID: "client-1",
@@ -98,7 +99,7 @@ func TestHandleRequest_FirstRequest_CreatesSession(t *testing.T) {
 
 func TestHandleRequest_SubsequentRequest_UsesExistingSession(t *testing.T) {
 	mgr, ser, cb, p := newTestDeps(t)
-	h := NewHandler(mgr, ser, cb, p)
+	h := NewHandler(mgr, ser, cb, p, 10)
 
 	// First request — establish the session.
 	first := IncomingRequest{
@@ -133,7 +134,7 @@ func TestHandleRequest_SubsequentRequest_UsesExistingSession(t *testing.T) {
 
 func TestHandleRequest_FirstRequest_NoIdentity_ReturnsError(t *testing.T) {
 	mgr, ser, cb, p := newTestDeps(t)
-	h := NewHandler(mgr, ser, cb, p)
+	h := NewHandler(mgr, ser, cb, p, 10)
 
 	req := IncomingRequest{
 		ClientID: "client-3",
@@ -149,7 +150,7 @@ func TestHandleRequest_FirstRequest_NoIdentity_ReturnsError(t *testing.T) {
 
 func TestHandleRequest_InvalidIdentity_SerializationError(t *testing.T) {
 	mgr, ser, cb, p := newTestDeps(t)
-	h := NewHandler(mgr, ser, cb, p)
+	h := NewHandler(mgr, ser, cb, p, 10)
 
 	req := IncomingRequest{
 		ClientID: "client-4",
@@ -165,7 +166,7 @@ func TestHandleRequest_InvalidIdentity_SerializationError(t *testing.T) {
 
 func TestHandleRequest_SessionNotFound(t *testing.T) {
 	mgr, ser, cb, p := newTestDeps(t)
-	h := NewHandler(mgr, ser, cb, p)
+	h := NewHandler(mgr, ser, cb, p, 10)
 
 	req := IncomingRequest{
 		ClientID:  "client-5",
@@ -181,7 +182,7 @@ func TestHandleRequest_SessionNotFound(t *testing.T) {
 
 func TestHandleRequest_WrongOwnership(t *testing.T) {
 	mgr, ser, cb, p := newTestDeps(t)
-	h := NewHandler(mgr, ser, cb, p)
+	h := NewHandler(mgr, ser, cb, p, 10)
 
 	// Create a session as client-6.
 	first := IncomingRequest{
@@ -209,7 +210,7 @@ func TestHandleRequest_WrongOwnership(t *testing.T) {
 func TestHandleRequest_QueryInjectionBlocked(t *testing.T) {
 	mgr, ser, cb, p := newTestDeps(t)
 	det := security.NewInjectionDetector(security.DetectorConfig{Mode: "strict"})
-	h := NewHandlerWithSecurity(mgr, ser, cb, p, det)
+	h := NewHandlerWithSecurity(mgr, ser, cb, p, 10, det)
 
 	req := IncomingRequest{
 		ClientID: "client-inj-1",
@@ -227,7 +228,7 @@ func TestHandleRequest_QueryInjectionBlocked(t *testing.T) {
 func TestHandleRequest_IdentityInjectionBlocked(t *testing.T) {
 	mgr, ser, cb, p := newTestDeps(t)
 	det := security.NewInjectionDetector(security.DetectorConfig{Mode: "strict"})
-	h := NewHandlerWithSecurity(mgr, ser, cb, p, det)
+	h := NewHandlerWithSecurity(mgr, ser, cb, p, 10, det)
 
 	req := IncomingRequest{
 		ClientID: "client-inj-2",
@@ -270,7 +271,7 @@ func TestHandleRequest_ResponseSizeCapped(t *testing.T) {
 		return &hugeProvider{}, nil
 	}
 	p := pool.New(pool.Config{MaxConnections: 2}, hugeFactory)
-	h := NewHandler(mgr, ser, cb, p)
+	h := NewHandler(mgr, ser, cb, p, 10)
 
 	req := IncomingRequest{
 		ClientID: "client-huge", APIKey: "key-abc",
@@ -287,7 +288,7 @@ func TestHandleRequest_ResponseSizeCapped(t *testing.T) {
 func TestHandle_ContextCodebookStored(t *testing.T) {
 	ctx := context.Background()
 	mgr, ser, cb, p := newTestDeps(t)
-	h := NewHandler(mgr, ser, cb, p)
+	h := NewHandler(mgr, ser, cb, p, 10)
 
 	req := IncomingRequest{
 		ClientID: "client-1",
@@ -313,7 +314,7 @@ func TestHandle_ContextCodebookStored(t *testing.T) {
 func TestHandle_HistoryGrowsAcrossTurns(t *testing.T) {
 	ctx := context.Background()
 	mgr, ser, cb, p := newTestDeps(t)
-	h := NewHandler(mgr, ser, cb, p)
+	h := NewHandler(mgr, ser, cb, p, 10)
 
 	first, err := h.HandleRequest(ctx, IncomingRequest{
 		ClientID: "client-1",
@@ -348,7 +349,7 @@ func TestHandleRequest_SessionLimitExceeded(t *testing.T) {
 		return &fakeProvider{response: "ok"}, nil
 	}
 	p := pool.New(pool.Config{MaxConnections: 2}, fakeFactory)
-	h := NewHandler(mgr, ser, cb, p)
+	h := NewHandler(mgr, ser, cb, p, 10)
 
 	// First session succeeds.
 	_, err = h.HandleRequest(context.Background(), IncomingRequest{
@@ -369,4 +370,51 @@ func TestHandleRequest_SessionLimitExceeded(t *testing.T) {
 		Opts:     session.Opts{Provider: "fake", Model: "fake-model"},
 	})
 	require.Error(t, err, "should fail when session limit exceeded")
+}
+
+func TestHandleRequest_CodebookDefReinjected(t *testing.T) {
+	mgr, ser, cb, p := newTestDeps(t)
+	// Window size of 3: inject on turns 0, 3, 6...
+	h := NewHandler(mgr, ser, cb, p, 3)
+
+	// Turn 0: creates session with context schema.
+	first, err := h.HandleRequest(context.Background(), IncomingRequest{
+		ClientID:      "client-cb-3",
+		APIKey:        "key-abc",
+		Query:         "turn 0",
+		Identity:      map[string]string{"role": "admin"},
+		ContextSchema: map[string]string{"role": "enum:user,assistant", "content": "text"},
+		Opts:          session.Opts{Provider: "fake", Model: "fake-model"},
+	})
+	require.NoError(t, err)
+
+	// Run turns 1, 2 (no re-injection), then turn 3 (re-injection: 3 % 3 == 0).
+	for i := 1; i <= 3; i++ {
+		_, err := h.HandleRequest(context.Background(), IncomingRequest{
+			ClientID:  "client-cb-3",
+			APIKey:    "key-abc",
+			SessionID: first.SessionID,
+			Query:     fmt.Sprintf("turn %d", i),
+			Opts:      session.Opts{Provider: "fake", Model: "fake-model"},
+		})
+		require.NoError(t, err)
+	}
+
+	sess, _ := mgr.Get(first.SessionID)
+	assert.Equal(t, 4, sess.Snapshot().Turns)
+}
+
+func TestHandleRequest_WindowSizeZero(t *testing.T) {
+	mgr, ser, cb, p := newTestDeps(t)
+	h := NewHandler(mgr, ser, cb, p, 0)
+
+	_, err := h.HandleRequest(context.Background(), IncomingRequest{
+		ClientID:      "client-cb-4",
+		APIKey:        "key-abc",
+		Query:         "turn 0",
+		Identity:      map[string]string{"role": "admin"},
+		ContextSchema: map[string]string{"role": "enum:user,assistant", "content": "text"},
+		Opts:          session.Opts{Provider: "fake", Model: "fake-model"},
+	})
+	require.NoError(t, err, "window size 0 should not panic")
 }

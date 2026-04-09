@@ -18,7 +18,7 @@ type AnthropicMessage struct {
 // and a head (older messages compressed into a [CONTEXT_SUMMARY] block).
 // If len(messages) <= windowSize, messages are returned unchanged.
 func Compress(messages []AnthropicMessage, windowSize int) []AnthropicMessage {
-	if len(messages) <= windowSize {
+	if windowSize < 2 || len(messages) <= windowSize {
 		return messages
 	}
 	head := messages[:len(messages)-windowSize]
