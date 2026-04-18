@@ -150,7 +150,7 @@ server:
 	cfg, err := config.Load(path)
 	require.NoError(t, err)
 	assert.Equal(t, 4242, cfg.Proxy.Port, "default proxy port")
-	assert.Equal(t, 10, cfg.Proxy.WindowSize, "default window size")
+	assert.Equal(t, 8, cfg.Proxy.WindowSize, "default window size")
 }
 
 func TestEnsureDefault_CreatesWhenMissing(t *testing.T) {

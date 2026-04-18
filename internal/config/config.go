@@ -190,7 +190,7 @@ server:
   port: 4433
 proxy:
   port: 4242
-  window_size: 10
+  window_size: 8
 `
 
 // EnsureDefault creates path with minimal defaults if it does not already exist.
@@ -328,7 +328,7 @@ func defaults() *Config {
 		},
 		Proxy: ProxyConfig{
 			Port:       4242,
-			WindowSize: 10,
+			WindowSize: 8,
 		},
 	}
 }

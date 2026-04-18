@@ -21,8 +21,8 @@ Engram applies three compression stages:
 ```mermaid
 flowchart LR
     A["Claude Code request<br/>15 prior messages"] --> B["Engram Proxy"]
-    B --> C["Keep recent window<br/>last 10 messages"]
-    B --> D["Compress older head<br/>first 5 messages"]
+    B --> C["Keep recent window<br/>last 8 messages"]
+    B --> D["Compress older head<br/>first 7 messages"]
     D --> E["[CONTEXT_SUMMARY]<br/>user: ...<br/>assistant: ..."]
     C --> F["Tail messages unchanged"]
     E --> G["Rewritten request"]
@@ -178,7 +178,7 @@ server:
 
 proxy:
   port: 4242          # HTTP proxy port (Claude Code routes through this)
-  window_size: 10     # default: keep the last 10 messages verbatim, summarize older history
+  window_size: 8      # default: keep the last 8 messages verbatim, summarize older history
 ```
 
 Run `engram serve --help` for the full list of options.
