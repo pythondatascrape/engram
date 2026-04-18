@@ -22,10 +22,11 @@ func isPlaceholder(s string) bool {
 
 // Handler implements http.Handler for the Anthropic-compatible proxy.
 type Handler struct {
-	windowSize  int
-	sessionsDir string
-	upstream    string // e.g. "https://api.anthropic.com"
-	client      *http.Client
+	windowSize     int
+	sessionsDir    string
+	upstream       string // e.g. "https://api.anthropic.com"
+	openaiUpstream string // e.g. "https://api.openai.com"
+	client         *http.Client
 	// afterStats is called after each WriteStats completes. Used in tests to
 	// avoid time.Sleep races; nil in production.
 	afterStats func()
@@ -41,12 +42,13 @@ type Handler struct {
 }
 
 // NewHandler creates a new Handler.
-func NewHandler(windowSize int, sessionsDir, upstream string) *Handler {
+func NewHandler(windowSize int, sessionsDir, upstream, openaiUpstream string) *Handler {
 	return &Handler{
-		windowSize:  windowSize,
-		sessionsDir: sessionsDir,
-		upstream:    upstream,
-		client:      &http.Client{},
+		windowSize:     windowSize,
+		sessionsDir:    sessionsDir,
+		upstream:       upstream,
+		openaiUpstream: openaiUpstream,
+		client:         &http.Client{},
 	}
 }
 
@@ -213,7 +215,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Only intercept POST /v1/messages.
 	if r.URL.Path != "/v1/messages" || r.Method != http.MethodPost {
-		h.forwardVerbatim(w, r, nil)
+		h.forwardVerbatim(w, r, nil, h.upstream)
 		return
 	}
 
@@ -228,7 +230,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var req anthropicRequest
 	if err := json.Unmarshal(rawBody, &req); err != nil {
 		// Fail-open: forward original body verbatim.
-		h.forwardVerbatim(w, r, rawBody)
+		h.forwardVerbatim(w, r, rawBody, h.upstream)
 		return
 	}
 	req.extractSystem()
@@ -268,35 +270,54 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"session", sessionID, "input_tokens", ctxOrig)
 	}
 
+	windowBefore := EstimateTokens(req.Messages)
 	req.Messages = Compress(req.Messages, h.windowSize)
+	windowSaved := windowBefore - EstimateTokens(req.Messages)
+
+	const contextBudget = 24000
+	budgetSaved := 0
+	if EstimateTokens(req.Messages) > contextBudget {
+		budgetBefore := EstimateTokens(req.Messages)
+		req.Messages = CompressBudget(req.Messages, contextBudget)
+		budgetSaved = budgetBefore - EstimateTokens(req.Messages)
+	}
 
 	// Re-encode by patching only the "messages" field in the original body.
 	// This preserves all fields (max_tokens, tools, temperature, etc.) that
 	// anthropicRequest does not model.
 	compressedMsgs, err := json.Marshal(req.Messages)
 	if err != nil {
-		h.forwardVerbatim(w, r, rawBody)
+		h.forwardVerbatim(w, r, rawBody, h.upstream)
 		return
 	}
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(rawBody, &raw); err != nil {
-		h.forwardVerbatim(w, r, rawBody)
+		h.forwardVerbatim(w, r, rawBody, h.upstream)
 		return
 	}
 	raw["messages"] = compressedMsgs
+	forwardedSystem := req.System
+	if windowSaved > 0 || budgetSaved > 0 {
+		slog.Info("proxy: compression savings",
+			"session", sessionID,
+			"window_saved_tokens", windowSaved,
+			"budget_saved_tokens", budgetSaved,
+			"total_saved_tokens", windowSaved+budgetSaved,
+		)
+	}
 	newBody, err := json.Marshal(raw)
 	if err != nil {
-		h.forwardVerbatim(w, r, rawBody)
+		h.forwardVerbatim(w, r, rawBody, h.upstream)
 		return
 	}
 
-	respBody := h.forwardWithBody(w, r, newBody)
+	respBody := h.forwardWithBody(w, r, newBody, h.upstream)
 
 	// Extract exact compressed token count from the API response usage field.
 	ctxComp := parseUsageInputTokens(respBody)
 	if ctxComp < 0 {
 		// Fallback to estimation.
-		systemTokens := len(req.System) / 4
+		systemTokens := len(forwardedSystem) / 4
 		ctxComp = EstimateTokens(req.Messages) + systemTokens
 		slog.Debug("proxy: response usage unavailable, using estimate",
 			"session", sessionID, "estimate", ctxComp)
@@ -315,7 +336,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 // forwardVerbatim forwards the request with the given body (or the original body if nil).
-func (h *Handler) forwardVerbatim(w http.ResponseWriter, r *http.Request, body []byte) {
+func (h *Handler) forwardVerbatim(w http.ResponseWriter, r *http.Request, body []byte, upstream string) {
 	if body == nil {
 		var err error
 		body, err = io.ReadAll(r.Body)
@@ -324,13 +345,13 @@ func (h *Handler) forwardVerbatim(w http.ResponseWriter, r *http.Request, body [
 			return
 		}
 	}
-	h.forwardWithBody(w, r, body)
+	h.forwardWithBody(w, r, body, upstream)
 }
 
 // forwardWithBody sends the request upstream with the provided body and streams
 // the response back. Returns the captured response body for usage extraction.
-func (h *Handler) forwardWithBody(w http.ResponseWriter, r *http.Request, body []byte) []byte {
-	upstreamURL := h.upstream + r.URL.RequestURI()
+func (h *Handler) forwardWithBody(w http.ResponseWriter, r *http.Request, body []byte, upstream string) []byte {
+	upstreamURL := upstream + r.URL.RequestURI()
 	upstreamReq, err := http.NewRequestWithContext(r.Context(), r.Method, upstreamURL, bytes.NewReader(body))
 	if err != nil {
 		http.Error(w, "failed to create upstream request", http.StatusBadGateway)
@@ -379,4 +400,186 @@ func (h *Handler) forwardWithBody(w http.ResponseWriter, r *http.Request, body [
 		}
 	}
 	return captured.Bytes()
+}
+
+// ServeOpenAI handles all requests arriving on the OpenAI-compatible listener.
+// POST /v1/chat/completions is compressed and forwarded to openaiUpstream;
+// everything else is forwarded verbatim.
+func (h *Handler) ServeOpenAI(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodPost && r.URL.Path == "/v1/chat/completions" {
+		rawBody, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, "failed to read body", http.StatusBadGateway)
+			return
+		}
+		var req openaiRequest
+		if err := json.Unmarshal(rawBody, &req); err != nil {
+			h.forwardVerbatim(w, r, rawBody, h.openaiUpstream)
+			return
+		}
+		h.handleOpenAI(w, r, rawBody, req)
+		return
+	}
+
+	if r.Method == http.MethodPost && r.URL.Path == "/v1/responses" {
+		rawBody, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, "failed to read body", http.StatusBadGateway)
+			return
+		}
+		var req openaiResponsesRequest
+		if err := json.Unmarshal(rawBody, &req); err != nil {
+			h.forwardVerbatim(w, r, rawBody, h.openaiUpstream)
+			return
+		}
+		h.handleOpenAIResponses(w, r, rawBody, req)
+		return
+	}
+
+	h.forwardVerbatim(w, r, nil, h.openaiUpstream)
+}
+
+func (h *Handler) handleOpenAI(w http.ResponseWriter, r *http.Request, rawBody []byte, req openaiRequest) {
+	sessionID := r.Header.Get(engramSessionHeader)
+	if sessionID == "" || isPlaceholder(sessionID) {
+		if pending := h.claimPendingSession(); pending != "" {
+			sessionID = pending
+		} else {
+			sessionID = fallbackOpenAISessionID(rawBody)
+		}
+	}
+
+	slog.Info("proxy: intercepted /v1/chat/completions",
+		"num_messages", len(req.Messages),
+		"session_id", sessionID,
+	)
+
+	ctxOrig := EstimateTokens(req.Messages)
+	if ctxOrig == 0 {
+		ctxOrig = estimateOpenAITokens(rawBody)
+	}
+
+	windowBefore := EstimateTokens(req.Messages)
+	req.Messages = Compress(req.Messages, h.windowSize)
+	windowSaved := windowBefore - EstimateTokens(req.Messages)
+
+	const contextBudget = 24000
+	budgetSaved := 0
+	if EstimateTokens(req.Messages) > contextBudget {
+		budgetBefore := EstimateTokens(req.Messages)
+		req.Messages = CompressBudget(req.Messages, contextBudget)
+		budgetSaved = budgetBefore - EstimateTokens(req.Messages)
+	}
+
+	if windowSaved > 0 || budgetSaved > 0 {
+		slog.Info("proxy: openai compression savings",
+			"session", sessionID,
+			"window_saved_tokens", windowSaved,
+			"budget_saved_tokens", budgetSaved,
+		)
+	}
+
+	// Patch only the "messages" field to preserve model, tools, stream, etc.
+	compressedMsgs, err := json.Marshal(req.Messages)
+	if err != nil {
+		h.forwardVerbatim(w, r, rawBody, h.openaiUpstream)
+		return
+	}
+	var rawMap map[string]json.RawMessage
+	if err := json.Unmarshal(rawBody, &rawMap); err != nil {
+		h.forwardVerbatim(w, r, rawBody, h.openaiUpstream)
+		return
+	}
+	rawMap["messages"] = compressedMsgs
+	newBody, err := json.Marshal(rawMap)
+	if err != nil {
+		h.forwardVerbatim(w, r, rawBody, h.openaiUpstream)
+		return
+	}
+
+	respBody := h.forwardWithBody(w, r, newBody, h.openaiUpstream)
+
+	go func() {
+		ctxComp := parseOpenAIUsage(respBody)
+		if ctxComp < 0 {
+			ctxComp = EstimateTokens(req.Messages)
+		}
+		_ = WriteStats(h.sessionsDir, sessionID, ctxOrig, ctxComp)
+		if h.afterStats != nil {
+			h.afterStats()
+		}
+	}()
+}
+
+func (h *Handler) handleOpenAIResponses(w http.ResponseWriter, r *http.Request, rawBody []byte, req openaiResponsesRequest) {
+	sessionID := r.Header.Get(engramSessionHeader)
+	if sessionID == "" || isPlaceholder(sessionID) {
+		if pending := h.claimPendingSession(); pending != "" {
+			sessionID = pending
+		} else {
+			sessionID = fallbackOpenAISessionID(rawBody)
+		}
+	}
+
+	forwardedInput, inputMessages, compressedMessages, inputCompressible := compressOpenAIInput(req.Input, h.windowSize, 24000)
+	if compressedMessages == nil {
+		compressedMessages = inputMessages
+	}
+
+	slog.Info("proxy: intercepted /v1/responses",
+		"num_messages", len(inputMessages),
+		"session_id", sessionID,
+	)
+
+	ctxOrig := EstimateTokens(inputMessages) + estimateInstructionsTokens(req.Instructions)
+	if ctxOrig == 0 {
+		ctxOrig = estimateOpenAITokens(rawBody)
+	}
+
+	windowBefore := EstimateTokens(inputMessages)
+	windowSaved := 0
+	budgetSaved := 0
+	if inputCompressible {
+		windowCompressed := Compress(inputMessages, h.windowSize)
+		windowSaved = windowBefore - EstimateTokens(windowCompressed)
+		budgetSaved = EstimateTokens(windowCompressed) - EstimateTokens(compressedMessages)
+		if budgetSaved < 0 {
+			budgetSaved = 0
+		}
+	}
+
+	if windowSaved > 0 || budgetSaved > 0 {
+		slog.Info("proxy: openai responses compression savings",
+			"session", sessionID,
+			"window_saved_tokens", windowSaved,
+			"budget_saved_tokens", budgetSaved,
+		)
+	}
+
+	var rawMap map[string]json.RawMessage
+	if err := json.Unmarshal(rawBody, &rawMap); err != nil {
+		h.forwardVerbatim(w, r, rawBody, h.openaiUpstream)
+		return
+	}
+	if inputCompressible {
+		rawMap["input"] = forwardedInput
+	}
+	newBody, err := json.Marshal(rawMap)
+	if err != nil {
+		h.forwardVerbatim(w, r, rawBody, h.openaiUpstream)
+		return
+	}
+
+	respBody := h.forwardWithBody(w, r, newBody, h.openaiUpstream)
+
+	go func() {
+		ctxComp := parseOpenAIResponsesUsage(respBody)
+		if ctxComp < 0 {
+			ctxComp = EstimateTokens(compressedMessages) + estimateInstructionsTokens(req.Instructions)
+		}
+		_ = WriteStats(h.sessionsDir, sessionID, ctxOrig, ctxComp)
+		if h.afterStats != nil {
+			h.afterStats()
+		}
+	}()
 }

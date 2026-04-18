@@ -38,9 +38,9 @@ func installPluginForOS(goos, binary, configPath, socketPath string, proxyPort i
 
 func newInstallCmd() *cobra.Command {
 	var (
-		claudeOnly  bool
+		claudeOnly   bool
 		openclawOnly bool
-		sourceDir   string
+		sourceDir    string
 	)
 
 	cmd := &cobra.Command{
@@ -123,8 +123,10 @@ the engram compression plugin. Use flags to target a specific client.`,
 						proxyPort = cfg.Proxy.Port
 					}
 
-					// Register proxy headers — required for Claude to route through Engram.
-					if err := install.RegisterProxyHeaders("", proxyPort); err != nil {
+					// Register proxy headers — required for Claude to route Anthropic
+					// traffic through Engram. Keep the Claude install path scoped to
+					// Anthropic so we do not overwrite unrelated OpenAI settings.
+					if err := install.RegisterProxyHeaders("", proxyPort, 0); err != nil {
 						return fmt.Errorf("register proxy headers: %w", err)
 					}
 					fmt.Fprintf(cmd.OutOrStdout(), "  Proxy headers registered in ~/.claude/settings.json (port %d)\n", proxyPort)

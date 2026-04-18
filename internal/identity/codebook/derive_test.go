@@ -35,3 +35,29 @@ func TestDerive_SerializedIsDeterministic(t *testing.T) {
 	assert.Equal(t, s1, s2)
 	assert.Equal(t, "a=1 b=2 c=3", s1)
 }
+
+func TestDerive_Prose_ResponseStyle(t *testing.T) {
+	dims, _ := codebook.Derive("Please prefer concise responses.")
+	assert.Equal(t, "concise", dims["response_style"])
+}
+
+func TestDerive_Prose_SummaryPolicy(t *testing.T) {
+	dims, _ := codebook.Derive("Do not include a trailing summary after each reply.")
+	assert.Equal(t, "no_trailing_summary", dims["summary_policy"])
+}
+
+func TestDerive_Prose_Role(t *testing.T) {
+	dims, _ := codebook.Derive("I am a senior software engineer on the platform team.")
+	assert.Equal(t, "engineer", dims["role"])
+}
+
+func TestDerive_Prose_KeyValueOverridesProse(t *testing.T) {
+	// Explicit key=value must beat prose inference for the same key.
+	dims, _ := codebook.Derive("response_style=verbose prefer concise responses")
+	assert.Equal(t, "verbose", dims["response_style"])
+}
+
+func TestDerive_Prose_NoFalsePositive(t *testing.T) {
+	dims, _ := codebook.Derive("The dog ran to the park.")
+	assert.Empty(t, dims)
+}

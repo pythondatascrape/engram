@@ -21,7 +21,7 @@ func TestSessionCorrelation(t *testing.T) {
 
 	sessionsDir := t.TempDir()
 	done := make(chan struct{}, 1)
-	h := NewHandler(512, sessionsDir, upstream.URL)
+	h := NewHandler(512, sessionsDir, upstream.URL, "")
 	h.afterStats = func() { done <- struct{}{} }
 
 	// 1. Register the real Claude session UUID (as sessionstart.mjs will do).
@@ -63,7 +63,7 @@ func TestFingerprintFallbackWhenNoSessionRegistered(t *testing.T) {
 
 	sessionsDir := t.TempDir()
 	done := make(chan struct{}, 1)
-	h := NewHandler(512, sessionsDir, upstream.URL)
+	h := NewHandler(512, sessionsDir, upstream.URL, "")
 	h.afterStats = func() { done <- struct{}{} }
 
 	// Send /v1/messages with placeholder header but NO prior registration.

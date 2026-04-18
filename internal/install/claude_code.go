@@ -38,13 +38,14 @@ func RegisterClaudeCodeWithStatusline(sourceDir, version, settingsPath string) e
 
 // RegisterProxyHeaders configures the Claude Code settings file at settingsPath
 // to route API traffic through the engram proxy on the given port.
+// When openaiPort > 0, OPENAI_BASE_URL is also set.
 // settingsPath defaults to ~/.claude/settings.json when empty.
-func RegisterProxyHeaders(settingsPath string, port int) error {
+func RegisterProxyHeaders(settingsPath string, port, openaiPort int) error {
 	sp, err := resolveSettingsPath(settingsPath)
 	if err != nil {
 		return err
 	}
-	return MergeProxySettings(sp, port)
+	return MergeProxySettings(sp, port, openaiPort)
 }
 
 // resolveSettingsPath returns settingsPath unchanged when non-empty,

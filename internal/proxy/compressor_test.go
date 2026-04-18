@@ -90,3 +90,45 @@ func TestEstimateTokens_Empty(t *testing.T) {
 		t.Errorf("expected 0 tokens for nil, got %d", got)
 	}
 }
+
+func TestCompressBudget_UnderBudgetNoop(t *testing.T) {
+	msgs := []AnthropicMessage{
+		{Role: "user", Content: "hello"},
+		{Role: "assistant", Content: "world"},
+	}
+	got := CompressBudget(msgs, 10000)
+	if len(got) != len(msgs) {
+		t.Fatalf("expected no change under budget, got %d messages", len(got))
+	}
+}
+
+func TestCompressBudget_OverBudgetCollapses(t *testing.T) {
+	// Build messages that exceed a tiny budget.
+	// Each 400-char message ≈ 100 tokens.
+	chunk := strings.Repeat("w", 400)
+	var msgs []AnthropicMessage
+	for i := 0; i < 6; i++ {
+		role := "user"
+		if i%2 == 1 {
+			role = "assistant"
+		}
+		msgs = append(msgs, AnthropicMessage{Role: role, Content: chunk})
+	}
+	// budget = 200 tokens → only ~2 messages fit; rest should be summarised
+	got := CompressBudget(msgs, 200)
+	if len(got) >= len(msgs) {
+		t.Fatalf("expected fewer messages after budget compression, got %d", len(got))
+	}
+	summary, ok := got[0].Content.(string)
+	if !ok || !strings.Contains(summary, "[CONTEXT_SUMMARY]") {
+		t.Errorf("expected [CONTEXT_SUMMARY] block in first message, got: %v", got[0].Content)
+	}
+}
+
+func TestCompressBudget_SingleMessageNoop(t *testing.T) {
+	msgs := []AnthropicMessage{{Role: "user", Content: "hi"}}
+	got := CompressBudget(msgs, 1)
+	if len(got) != 1 {
+		t.Fatalf("expected single message preserved, got %d", len(got))
+	}
+}

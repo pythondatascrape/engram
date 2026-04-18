@@ -58,7 +58,7 @@ func TestE2EContextTokenAccumulation(t *testing.T) {
 	sessionID := "e2e-test-session"
 
 	done := make(chan struct{}, 1)
-	h := NewHandler(10, sessDir, srv.URL) // window=10 so compression triggers at >10 messages
+	h := NewHandler(10, sessDir, srv.URL, "") // window=10 so compression triggers at >10 messages
 	h.afterStats = func() { done <- struct{}{} }
 
 	// Register the session.

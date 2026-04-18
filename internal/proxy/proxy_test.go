@@ -10,7 +10,7 @@ import (
 )
 
 func TestServerStartStop(t *testing.T) {
-	srv := New(0, 10, t.TempDir(), "http://127.0.0.1:1") // port 0 = OS assigns
+	srv := New(0, 10, t.TempDir(), "http://127.0.0.1:1", 0, "") // port 0 = OS assigns
 	if err := srv.Start(); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -22,7 +22,7 @@ func TestServerStartStop(t *testing.T) {
 }
 
 func TestServerAddr(t *testing.T) {
-	srv := New(0, 10, t.TempDir(), "http://127.0.0.1:1")
+	srv := New(0, 10, t.TempDir(), "http://127.0.0.1:1", 0, "")
 	if err := srv.Start(); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -47,7 +47,7 @@ func TestServerAddr(t *testing.T) {
 }
 
 func TestAddrBeforeStart(t *testing.T) {
-	srv := New(0, 10, t.TempDir(), "http://127.0.0.1:1")
+	srv := New(0, 10, t.TempDir(), "http://127.0.0.1:1", 0, "")
 	if addr := srv.Addr(); addr != nil {
 		t.Fatalf("Addr() should be nil before Start(), got %v", addr)
 	}

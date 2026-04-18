@@ -136,7 +136,7 @@ func TestRegisterProxyHeaders_WritesSettings(t *testing.T) {
 
 	settingsPath := filepath.Join(fakeHome, "settings.json")
 
-	err := RegisterProxyHeaders(settingsPath, 4242)
+	err := RegisterProxyHeaders(settingsPath, 4242, 0)
 	require.NoError(t, err)
 
 	data, err := os.ReadFile(settingsPath)

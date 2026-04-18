@@ -51,10 +51,11 @@ func MergeClaudeSettings(settingsPath, cmd string) error {
 }
 
 // MergeProxySettings reads the Claude Code settings file at settingsPath,
-// sets env.ANTHROPIC_BASE_URL to the given port and adds the X-Engram-Session
+// sets env.ANTHROPIC_BASE_URL to the given Anthropic proxy port, and optionally
+// sets env.OPENAI_BASE_URL when openaiPort > 0. Adds the X-Engram-Session
 // request header. All other keys in env and requestHeaders are preserved.
 // If settingsPath does not exist, it is created along with parent directories.
-func MergeProxySettings(settingsPath string, port int) error {
+func MergeProxySettings(settingsPath string, port, openaiPort int) error {
 	settings := make(map[string]any)
 
 	data, err := os.ReadFile(settingsPath)
@@ -74,6 +75,9 @@ func MergeProxySettings(settingsPath string, port int) error {
 		}
 	}
 	env["ANTHROPIC_BASE_URL"] = fmt.Sprintf("http://localhost:%d", port)
+	if openaiPort > 0 {
+		env["OPENAI_BASE_URL"] = fmt.Sprintf("http://localhost:%d", openaiPort)
+	}
 	settings["env"] = env
 
 	// Merge requestHeaders

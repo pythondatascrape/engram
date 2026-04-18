@@ -178,10 +178,53 @@ server:
 
 proxy:
   port: 4242          # HTTP proxy port (Claude Code routes through this)
+  openai_port: 4243   # OpenAI-compatible proxy port (optional, 0 = disabled)
   window_size: 8      # default: keep the last 8 messages verbatim, summarize older history
 ```
 
 Run `engram serve --help` for the full list of options.
+
+## OpenAI-Compatible Proxy
+
+When `openai_port` is set (default: **4243**), Engram exposes a second listener that accepts standard OpenAI API calls and applies the same context-compression pipeline before forwarding to OpenAI.
+
+**Supported endpoints:**
+- `POST /v1/chat/completions` — Chat Completions API (streaming and non-streaming)
+- `POST /v1/responses` — Responses API (streaming and non-streaming)
+
+**Quick test:**
+```bash
+curl http://localhost:4243/v1/chat/completions \
+  -H "Authorization: Bearer $OPENAI_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"gpt-4o-mini","messages":[{"role":"user","content":"ping"}]}'
+```
+
+**Point an OpenAI SDK at the proxy:**
+```python
+from openai import OpenAI
+
+client = OpenAI(
+    api_key="...",
+    base_url="http://localhost:4243/v1",
+)
+
+response = client.chat.completions.create(
+    model="gpt-4o-mini",
+    messages=[{"role": "user", "content": "Hello"}],
+)
+```
+
+```typescript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+  baseURL: "http://localhost:4243/v1",
+});
+```
+
+Engram compresses `messages` (or `input` for the Responses API) using the same window-based summarisation as the Anthropic proxy, then forwards the full request — headers, `model`, `tools`, `tool_choice`, `stream`, etc. — unmodified to `api.openai.com`.
 
 ## Demo
 

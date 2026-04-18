@@ -155,8 +155,10 @@ type LoggingConfig struct {
 }
 
 type ProxyConfig struct {
-	Port       int `yaml:"port"`
-	WindowSize int `yaml:"window_size"`
+	Port           int    `yaml:"port"`
+	WindowSize     int    `yaml:"window_size"`
+	OpenAIPort     int    `yaml:"openai_port"`
+	OpenAIUpstream string `yaml:"openai_upstream"`
 }
 
 // Load reads the YAML file at path, applies defaults, applies env overrides,
@@ -327,8 +329,10 @@ func defaults() *Config {
 			RedactQueries:  true,
 		},
 		Proxy: ProxyConfig{
-			Port:       4242,
-			WindowSize: 8,
+			Port:           4242,
+			WindowSize:     8,
+			OpenAIPort:     4243,
+			OpenAIUpstream: "https://api.openai.com",
 		},
 	}
 }
@@ -349,6 +353,9 @@ func applyEnvOverrides(cfg *Config) {
 
 // DefaultProxyPort is the proxy port used when no config file is available.
 const DefaultProxyPort = 4242
+
+// DefaultOpenAIProxyPort is the OpenAI-compatible proxy port used when no config file is available.
+const DefaultOpenAIProxyPort = 4243
 
 const minMemoryCeilingBytes = 128 * 1024 * 1024 // 128 MB
 

@@ -107,7 +107,7 @@ func TestNonMessagesPathForwarded(t *testing.T) {
 	srv, received := fakeAnthropic(t)
 	defer srv.Close()
 
-	h := NewHandler(5, t.TempDir(), srv.URL)
+	h := NewHandler(5, t.TempDir(), srv.URL, "")
 	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
 	req.Header.Set("Authorization", "Bearer sk-test")
 	w := httptest.NewRecorder()
@@ -126,7 +126,7 @@ func TestMessagesCompressed(t *testing.T) {
 	defer srv.Close()
 
 	done := make(chan struct{}, 1)
-	h := NewHandler(5, t.TempDir(), srv.URL)
+	h := NewHandler(5, t.TempDir(), srv.URL, "")
 	h.afterStats = func() { done <- struct{}{} }
 	msgs := makeMessages(15)
 	resp := postMessages(t, h, msgs, "sys", nil)
@@ -161,7 +161,7 @@ func TestCompressedBodyPreservesAllFields(t *testing.T) {
 	defer srv.Close()
 
 	done := make(chan struct{}, 1)
-	h := NewHandler(5, t.TempDir(), srv.URL)
+	h := NewHandler(5, t.TempDir(), srv.URL, "")
 	h.afterStats = func() { done <- struct{}{} }
 
 	// Build a request body with extra fields that anthropicRequest doesn't model.
@@ -212,7 +212,7 @@ func TestBelowWindowSizeNoCompression(t *testing.T) {
 	defer srv.Close()
 
 	done := make(chan struct{}, 1)
-	h := NewHandler(10, t.TempDir(), srv.URL)
+	h := NewHandler(10, t.TempDir(), srv.URL, "")
 	h.afterStats = func() { done <- struct{}{} }
 	msgs := makeMessages(3)
 	postMessages(t, h, msgs, "sys", nil)
@@ -236,7 +236,7 @@ func TestXEngramSessionHeader(t *testing.T) {
 
 	dir := t.TempDir()
 	done := make(chan struct{}, 1)
-	h := NewHandler(5, dir, srv.URL)
+	h := NewHandler(5, dir, srv.URL, "")
 	h.afterStats = func() { done <- struct{}{} }
 	postMessages(t, h, makeMessages(3), "sys", map[string]string{
 		"X-Engram-Session": "my-session-id",
@@ -256,7 +256,7 @@ func TestSystemPromptFingerprintFallback(t *testing.T) {
 
 	dir := t.TempDir()
 	done := make(chan struct{}, 1)
-	h := NewHandler(5, dir, srv.URL)
+	h := NewHandler(5, dir, srv.URL, "")
 	h.afterStats = func() { done <- struct{}{} }
 	postMessages(t, h, makeMessages(3), "some text", nil)
 	<-done
@@ -275,7 +275,7 @@ func TestStatsWritten(t *testing.T) {
 
 	dir := t.TempDir()
 	done := make(chan struct{}, 1)
-	h := NewHandler(5, dir, srv.URL)
+	h := NewHandler(5, dir, srv.URL, "")
 	h.afterStats = func() { done <- struct{}{} }
 	postMessages(t, h, makeMessages(10), "statstest", map[string]string{
 		"X-Engram-Session": "stats-session",
@@ -327,7 +327,7 @@ func TestMalformedJSONFailOpen(t *testing.T) {
 	srv, received := fakeAnthropic(t)
 	defer srv.Close()
 
-	h := NewHandler(5, t.TempDir(), srv.URL)
+	h := NewHandler(5, t.TempDir(), srv.URL, "")
 	badBody := "this is not json {"
 	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(badBody))
 	req.Header.Set("Authorization", "Bearer sk-test")
@@ -347,7 +347,7 @@ func TestPlaceholderSessionIDFallsBackToFingerprint(t *testing.T) {
 
 	dir := t.TempDir()
 	done := make(chan struct{}, 1)
-	h := NewHandler(5, dir, srv.URL)
+	h := NewHandler(5, dir, srv.URL, "")
 	h.afterStats = func() { done <- struct{}{} }
 
 	// Send with the literal placeholder that engram install writes.
@@ -374,7 +374,7 @@ func TestRegisterSessionEndpoint(t *testing.T) {
 	srv, _ := fakeAnthropic(t)
 	defer srv.Close()
 
-	h := NewHandler(5, t.TempDir(), srv.URL)
+	h := NewHandler(5, t.TempDir(), srv.URL, "")
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/internal/register-session",
@@ -397,7 +397,7 @@ func TestRegisterSessionEndpoint(t *testing.T) {
 // TestRegisterSessionRejectsPlaceholder verifies that the literal "${session_id}"
 // injected by engram install is rejected with 400, not stored.
 func TestRegisterSessionRejectsPlaceholder(t *testing.T) {
-	h := NewHandler(5, t.TempDir(), "")
+	h := NewHandler(5, t.TempDir(), "", "")
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/internal/register-session",
@@ -414,7 +414,7 @@ func TestRegisterSessionRejectsPlaceholder(t *testing.T) {
 
 // TestRegisterSessionRejectsEmpty verifies that an empty session_id returns 400.
 func TestRegisterSessionRejectsEmpty(t *testing.T) {
-	h := NewHandler(5, t.TempDir(), "")
+	h := NewHandler(5, t.TempDir(), "", "")
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/internal/register-session",
@@ -433,7 +433,7 @@ func TestRegisterSessionGetFallsThrough(t *testing.T) {
 	srv, _ := fakeAnthropic(t)
 	defer srv.Close()
 
-	h := NewHandler(5, t.TempDir(), srv.URL)
+	h := NewHandler(5, t.TempDir(), srv.URL, "")
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/internal/register-session", nil)
@@ -451,7 +451,7 @@ func TestStatsIncludeSystemPrompt(t *testing.T) {
 
 	dir := t.TempDir()
 	done := make(chan struct{}, 1)
-	h := NewHandler(5, dir, srv.URL)
+	h := NewHandler(5, dir, srv.URL, "")
 	h.afterStats = func() { done <- struct{}{} }
 
 	// System prompt of 400 chars → ~100 tokens.
@@ -497,7 +497,7 @@ func TestSystemArrayCountsTokensAndFingerprintFallback(t *testing.T) {
 
 	dir := t.TempDir()
 	done := make(chan struct{}, 1)
-	h := NewHandler(10, dir, srv.URL)
+	h := NewHandler(10, dir, srv.URL, "")
 	h.afterStats = func() { done <- struct{}{} }
 
 	systemTextA := strings.Repeat("a", 200)

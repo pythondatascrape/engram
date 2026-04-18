@@ -167,7 +167,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	slog.Info("engram daemon ready", "socket", socketPath)
 
 	sessionsDir := DefaultSessionsDir()
-	proxySrv := proxy.New(cfg.Proxy.Port, cfg.Proxy.WindowSize, sessionsDir, "https://api.anthropic.com")
+	proxySrv := proxy.New(cfg.Proxy.Port, cfg.Proxy.WindowSize, sessionsDir, "https://api.anthropic.com", cfg.Proxy.OpenAIPort, cfg.Proxy.OpenAIUpstream)
 	if err := proxySrv.Start(); err != nil {
 		return fmt.Errorf("start proxy on :%d: %w", cfg.Proxy.Port, err)
 	}
