@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+
+	"github.com/pythondatascrape/engram/internal/identity/codebook"
 )
 
 // engramSessionHeader is the request header used to pass the session ID from
@@ -297,12 +299,22 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	raw["messages"] = compressedMsgs
 	forwardedSystem := req.System
-	if windowSaved > 0 || budgetSaved > 0 {
+	systemSaved := 0
+	if req.System != "" {
+		if compressed, ok := codebook.CompressIfSafe(req.System); ok {
+			systemSaved = len(req.System)/4 - len(compressed)/4
+			b, _ := json.Marshal(compressed)
+			raw["system"] = b
+			forwardedSystem = compressed
+		}
+	}
+	if windowSaved > 0 || budgetSaved > 0 || systemSaved > 0 {
 		slog.Info("proxy: compression savings",
 			"session", sessionID,
 			"window_saved_tokens", windowSaved,
 			"budget_saved_tokens", budgetSaved,
-			"total_saved_tokens", windowSaved+budgetSaved,
+			"system_saved_tokens", systemSaved,
+			"total_saved_tokens", windowSaved+budgetSaved+systemSaved,
 		)
 	}
 	newBody, err := json.Marshal(raw)
@@ -459,6 +471,9 @@ func (h *Handler) handleOpenAI(w http.ResponseWriter, r *http.Request, rawBody [
 		ctxOrig = estimateOpenAITokens(rawBody)
 	}
 
+	identitySaved := 0
+	req.Messages, identitySaved = compressOpenAIIdentityMessages(req.Messages)
+
 	windowBefore := EstimateTokens(req.Messages)
 	req.Messages = Compress(req.Messages, h.windowSize)
 	windowSaved := windowBefore - EstimateTokens(req.Messages)
@@ -471,9 +486,10 @@ func (h *Handler) handleOpenAI(w http.ResponseWriter, r *http.Request, rawBody [
 		budgetSaved = budgetBefore - EstimateTokens(req.Messages)
 	}
 
-	if windowSaved > 0 || budgetSaved > 0 {
+	if windowSaved > 0 || budgetSaved > 0 || identitySaved > 0 {
 		slog.Info("proxy: openai compression savings",
 			"session", sessionID,
+			"identity_saved_tokens", identitySaved,
 			"window_saved_tokens", windowSaved,
 			"budget_saved_tokens", budgetSaved,
 		)
@@ -521,6 +537,7 @@ func (h *Handler) handleOpenAIResponses(w http.ResponseWriter, r *http.Request, 
 		}
 	}
 
+	compressedInstructions, instructionSaved := compressOpenAIInstructions(req.Instructions)
 	forwardedInput, inputMessages, compressedMessages, inputCompressible := compressOpenAIInput(req.Input, h.windowSize, 24000)
 	if compressedMessages == nil {
 		compressedMessages = inputMessages
@@ -548,9 +565,10 @@ func (h *Handler) handleOpenAIResponses(w http.ResponseWriter, r *http.Request, 
 		}
 	}
 
-	if windowSaved > 0 || budgetSaved > 0 {
+	if windowSaved > 0 || budgetSaved > 0 || instructionSaved > 0 {
 		slog.Info("proxy: openai responses compression savings",
 			"session", sessionID,
+			"identity_saved_tokens", instructionSaved,
 			"window_saved_tokens", windowSaved,
 			"budget_saved_tokens", budgetSaved,
 		)
@@ -560,6 +578,9 @@ func (h *Handler) handleOpenAIResponses(w http.ResponseWriter, r *http.Request, 
 	if err := json.Unmarshal(rawBody, &rawMap); err != nil {
 		h.forwardVerbatim(w, r, rawBody, h.openaiUpstream)
 		return
+	}
+	if compressedInstructions != req.Instructions {
+		rawMap["instructions"] = mustMarshalJSON(compressedInstructions)
 	}
 	if inputCompressible {
 		rawMap["input"] = forwardedInput

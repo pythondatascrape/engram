@@ -454,8 +454,11 @@ func TestStatsIncludeSystemPrompt(t *testing.T) {
 	h := NewHandler(5, dir, srv.URL, "")
 	h.afterStats = func() { done <- struct{}{} }
 
-	// System prompt of 400 chars → ~100 tokens.
-	system := strings.Repeat("a", 400)
+	// System prompt of ~100 tokens using prose that won't compress to zero.
+	system := "You are a helpful assistant. Your task is to answer questions clearly and accurately. " +
+		"When the user asks a question, provide a thorough and thoughtful response. " +
+		"Be concise but complete. Avoid unnecessary filler. Focus on accuracy and helpfulness. " +
+		"Always be polite and professional in your responses to the user."
 	// 3 messages (below window, no compression) with ~40 chars each → ~10 tokens each.
 	msgs := []AnthropicMessage{
 		{Role: "user", Content: strings.Repeat("b", 40)},
@@ -478,13 +481,16 @@ func TestStatsIncludeSystemPrompt(t *testing.T) {
 		t.Fatalf("parse stats: %v", err)
 	}
 
-	// Without system prompt: ~30 tokens (3 msgs * 10 tokens each).
-	// With system prompt: ~130 tokens (30 + 100).
+	// ctxOrig should include system prompt tokens (~100) plus message tokens (~30).
 	if stats.CtxOrig < 100 {
 		t.Errorf("ctxOrig should include system prompt tokens; got %d, want >= 100", stats.CtxOrig)
 	}
-	if stats.CtxComp < 100 {
-		t.Errorf("ctxComp should include system prompt tokens; got %d, want >= 100", stats.CtxComp)
+	// ctxComp may be lower than ctxOrig if compression fired; it must be > 0.
+	if stats.CtxComp <= 0 {
+		t.Errorf("ctxComp should be > 0; got %d", stats.CtxComp)
+	}
+	if stats.CtxComp > stats.CtxOrig {
+		t.Errorf("ctxComp (%d) should not exceed ctxOrig (%d)", stats.CtxComp, stats.CtxOrig)
 	}
 	if stats.Turns != 1 {
 		t.Errorf("turns = %d, want 1", stats.Turns)
@@ -528,11 +534,68 @@ func TestSystemArrayCountsTokensAndFingerprintFallback(t *testing.T) {
 		t.Fatalf("parse stats: %v", err)
 	}
 
-	// 400 chars of system prompt should contribute about 100 tokens, plus the user message.
 	if stats.CtxOrig < 100 {
 		t.Fatalf("ctxOrig should include array-form system prompt tokens; got %d", stats.CtxOrig)
 	}
-	if stats.CtxComp < 100 {
-		t.Fatalf("ctxComp should include array-form system prompt tokens; got %d", stats.CtxComp)
+	if stats.CtxComp <= 0 {
+		t.Fatalf("ctxComp should be > 0; got %d", stats.CtxComp)
+	}
+	if stats.CtxComp > stats.CtxOrig {
+		t.Fatalf("ctxComp (%d) should not exceed ctxOrig (%d)", stats.CtxComp, stats.CtxOrig)
+	}
+}
+
+func TestSystemCompressionFailsOpenForThinProse(t *testing.T) {
+	srv, received := fakeAnthropic(t)
+	defer srv.Close()
+
+	done := make(chan struct{}, 1)
+	h := NewHandler(10, t.TempDir(), srv.URL, "")
+	h.afterStats = func() { done <- struct{}{} }
+
+	system := "Please prefer concise responses and do not include a trailing summary."
+	resp := postMessages(t, h, makeMessages(3), system, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+	<-done
+
+	var parsed struct {
+		System string `json:"system"`
+	}
+	if err := json.Unmarshal(*received, &parsed); err != nil {
+		t.Fatalf("parse received body: %v", err)
+	}
+	if parsed.System != system {
+		t.Fatalf("expected thin prose system to be forwarded unchanged; got %q", parsed.System)
+	}
+}
+
+func TestSystemCompressionAllowsStructuredIdentity(t *testing.T) {
+	srv, received := fakeAnthropic(t)
+	defer srv.Close()
+
+	done := make(chan struct{}, 1)
+	h := NewHandler(10, t.TempDir(), srv.URL, "")
+	h.afterStats = func() { done <- struct{}{} }
+
+	system := "role: engineer\nresponse_style: concise\nplatform: macos"
+	resp := postMessages(t, h, makeMessages(3), system, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+	<-done
+
+	var parsed struct {
+		System string `json:"system"`
+	}
+	if err := json.Unmarshal(*received, &parsed); err != nil {
+		t.Fatalf("parse received body: %v", err)
+	}
+	if parsed.System == system {
+		t.Fatalf("expected structured identity system to be normalized to key=value form; got unchanged %q", parsed.System)
+	}
+	if !strings.Contains(parsed.System, "role=engineer") {
+		t.Fatalf("expected compressed system to contain derived key=value pairs, got %q", parsed.System)
 	}
 }

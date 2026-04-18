@@ -259,6 +259,47 @@ func TestServeOpenAI_PreservesUnknownFields(t *testing.T) {
 	<-done
 }
 
+func TestServeOpenAI_CompressesDeveloperIdentityMessage(t *testing.T) {
+	upstream, received := fakeOpenAI(t)
+	defer upstream.Close()
+
+	done := make(chan struct{})
+	h := NewHandler(50, t.TempDir(), "http://unused", upstream.URL)
+	h.afterStats = func() {
+		select {
+		case <-done:
+		default:
+			close(done)
+		}
+	}
+
+	payload := map[string]any{
+		"model": "gpt-4o",
+		"messages": []map[string]any{
+			{"role": "developer", "content": "role: engineer\nresponse_style: concise\nplatform: macos"},
+			{"role": "user", "content": "hello"},
+		},
+	}
+	b, _ := json.Marshal(payload)
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(b))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	h.ServeOpenAI(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d", w.Code)
+	}
+	<-done
+
+	var forwarded openaiRequest
+	if err := json.Unmarshal(*received, &forwarded); err != nil {
+		t.Fatalf("upstream received invalid JSON: %v", err)
+	}
+	devContent, _ := forwarded.Messages[0].Content.(string)
+	if !strings.Contains(devContent, "role=engineer") {
+		t.Fatalf("expected developer message to be compressed to key=value form, got %q", devContent)
+	}
+}
+
 // TestServeOpenAI_StreamingPassthrough verifies that streaming SSE chunks are
 // forwarded intact to the client.
 func TestServeOpenAI_StreamingPassthrough(t *testing.T) {
@@ -599,6 +640,56 @@ func TestServeOpenAIResponses_FallbackStatsIncludeInstructions(t *testing.T) {
 	}
 	if stats.CtxComp <= inputOnly {
 		t.Fatalf("expected instructions to increase ctx_comp beyond input-only estimate, got %d", stats.CtxComp)
+	}
+}
+
+func TestServeOpenAIResponses_CompressesInstructionsWhenSafe(t *testing.T) {
+	var received []byte
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		received, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id":    "resp-test",
+			"usage": map[string]any{"input_tokens": 5, "output_tokens": 1},
+		})
+	}))
+	defer upstream.Close()
+
+	done := make(chan struct{})
+	h := NewHandler(50, t.TempDir(), "http://unused", upstream.URL)
+	h.afterStats = func() {
+		select {
+		case <-done:
+		default:
+			close(done)
+		}
+	}
+
+	payload := map[string]any{
+		"model":        "gpt-4o",
+		"instructions": "role: engineer\nresponse_style: concise\nplatform: macos",
+		"input":        "Review the patch",
+	}
+	b, _ := json.Marshal(payload)
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(b))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	h.ServeOpenAI(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d", w.Code)
+	}
+	<-done
+
+	var forwarded map[string]json.RawMessage
+	if err := json.Unmarshal(received, &forwarded); err != nil {
+		t.Fatalf("upstream received invalid JSON: %v", err)
+	}
+	var instructions string
+	if err := json.Unmarshal(forwarded["instructions"], &instructions); err != nil {
+		t.Fatalf("parse instructions: %v", err)
+	}
+	if !strings.Contains(instructions, "role=engineer") {
+		t.Fatalf("expected instructions to be compressed to key=value form, got %q", instructions)
 	}
 }
 

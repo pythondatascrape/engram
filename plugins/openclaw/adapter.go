@@ -54,22 +54,8 @@ func (a *Adapter) Connect(ctx context.Context) error {
 	return nil
 }
 
-// parseDimensions splits a space-separated string of key=value pairs into a
-// map[string]string. Entries without an '=' are ignored.
-func parseDimensions(s string) map[string]string {
-	dims := make(map[string]string)
-	for _, part := range strings.Fields(s) {
-		k, v, ok := strings.Cut(part, "=")
-		if !ok {
-			continue
-		}
-		dims[k] = v
-	}
-	return dims
-}
-
 // CompressContext sends content to the daemon for compression.
-// content must be a space-separated list of key=value pairs.
+// content may be prose or pre-structured key=value identity text.
 func (a *Adapter) CompressContext(ctx context.Context, content string) (string, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -78,17 +64,17 @@ func (a *Adapter) CompressContext(ctx context.Context, content string) (string, 
 		return "", fmt.Errorf("not connected to engram daemon")
 	}
 
-	id := a.nextID
+	deriveID := a.nextID
 	a.nextID++
 
-	req := map[string]interface{}{
+	deriveReq := map[string]interface{}{
 		"jsonrpc": "2.0",
-		"id":      id,
-		"method":  "engram.compressIdentity",
-		"params":  map[string]interface{}{"dimensions": parseDimensions(content)},
+		"id":      deriveID,
+		"method":  "engram.deriveCodebook",
+		"params":  map[string]interface{}{"content": content},
 	}
 
-	data, err := json.Marshal(req)
+	data, err := json.Marshal(deriveReq)
 	if err != nil {
 		return "", fmt.Errorf("marshal request: %w", err)
 	}
@@ -97,11 +83,40 @@ func (a *Adapter) CompressContext(ctx context.Context, content string) (string, 
 		return "", fmt.Errorf("send request: %w", err)
 	}
 
-	if !a.scanner.Scan() {
-		if err := a.scanner.Err(); err != nil {
-			return "", fmt.Errorf("read response: %w", err)
-		}
-		return "", fmt.Errorf("read response: connection closed")
+	var deriveResp struct {
+		Result struct {
+			Codebook map[string]string `json:"codebook"`
+		} `json:"result"`
+		Error *struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := a.scanInto(&deriveResp); err != nil {
+		return "", err
+	}
+	if deriveResp.Error != nil {
+		return "", fmt.Errorf("daemon error: %s", deriveResp.Error.Message)
+	}
+
+	compressID := a.nextID
+	a.nextID++
+	compressReq := map[string]interface{}{
+		"jsonrpc": "2.0",
+		"id":      compressID,
+		"method":  "engram.compressIdentity",
+		"params": map[string]interface{}{
+			"dimensions":     deriveResp.Result.Codebook,
+			"originalTokens": estimateTokens(content),
+		},
+	}
+
+	data, err = json.Marshal(compressReq)
+	if err != nil {
+		return "", fmt.Errorf("marshal request: %w", err)
+	}
+
+	if _, err := a.conn.Write(append(data, '\n')); err != nil {
+		return "", fmt.Errorf("send request: %w", err)
 	}
 
 	var resp struct {
@@ -113,8 +128,8 @@ func (a *Adapter) CompressContext(ctx context.Context, content string) (string, 
 		} `json:"error"`
 	}
 
-	if err := json.Unmarshal(a.scanner.Bytes(), &resp); err != nil {
-		return "", fmt.Errorf("unmarshal response: %w", err)
+	if err := a.scanInto(&resp); err != nil {
+		return "", err
 	}
 
 	if resp.Error != nil {
@@ -126,6 +141,27 @@ func (a *Adapter) CompressContext(ctx context.Context, content string) (string, 
 	}
 
 	return resp.Result.Serialized, nil
+}
+
+func (a *Adapter) scanInto(dst any) error {
+	if !a.scanner.Scan() {
+		if err := a.scanner.Err(); err != nil {
+			return fmt.Errorf("read response: %w", err)
+		}
+		return fmt.Errorf("read response: connection closed")
+	}
+	if err := json.Unmarshal(a.scanner.Bytes(), dst); err != nil {
+		return fmt.Errorf("unmarshal response: %w", err)
+	}
+	return nil
+}
+
+func estimateTokens(text string) int {
+	tokens := len(strings.TrimSpace(text)) / 4
+	if tokens < 1 {
+		return 1
+	}
+	return tokens
 }
 
 // Close disconnects from the daemon.

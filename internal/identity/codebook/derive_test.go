@@ -61,3 +61,24 @@ func TestDerive_Prose_NoFalsePositive(t *testing.T) {
 	dims, _ := codebook.Derive("The dog ran to the park.")
 	assert.Empty(t, dims)
 }
+
+func TestCompressIfSafe_AllowsStructuredIdentity(t *testing.T) {
+	compressed, ok := codebook.CompressIfSafe("role: engineer\nresponse_style: concise\nplatform: macos")
+	assert.True(t, ok)
+	assert.Contains(t, compressed, "role=engineer")
+}
+
+func TestCompressIfSafe_RejectsThinProse(t *testing.T) {
+	compressed, ok := codebook.CompressIfSafe("Please prefer concise responses and do not include a trailing summary.")
+	assert.False(t, ok)
+	assert.Equal(t, "", compressed)
+}
+
+func TestCompressIfSafe_AllowsDenseProse(t *testing.T) {
+	content := "I am a senior software engineer. Please prefer concise responses. Do not include a trailing summary. " +
+		"Target macOS and linux. This repository is written in Go."
+	compressed, ok := codebook.CompressIfSafe(content)
+	assert.True(t, ok)
+	assert.Contains(t, compressed, "response_style=concise")
+	assert.Contains(t, compressed, "platform=macos,linux")
+}

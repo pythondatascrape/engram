@@ -13,6 +13,11 @@ type proseRule struct {
 	val string
 }
 
+type DeriveStats struct {
+	ExplicitCount int
+	ProseCount    int
+}
+
 var proseRules = []proseRule{
 	{re: regexp.MustCompile(`(?i)prefer concise|concise responses?|be concise`), key: "response_style", val: "concise"},
 	{re: regexp.MustCompile(`(?i)no trailing summar|do not.*summar|don't.*summar`), key: "summary_policy", val: "no_trailing_summary"},
@@ -42,10 +47,37 @@ func deriveProse(content string) map[string]string {
 	return dims
 }
 
-// Derive parses key=value and "key: value" pairs from content and returns
-// a map of the extracted dimensions and a deterministic serialized key=value string.
-func Derive(content string) (map[string]string, string) {
+func countExplicit(content string) int {
+	count := 0
+	for _, line := range strings.Split(content, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if idx := strings.Index(line, ": "); idx > 0 {
+			key := strings.TrimSpace(line[:idx])
+			val := strings.TrimSpace(line[idx+2:])
+			if isSimpleKey(key) && val != "" {
+				count++
+				continue
+			}
+		}
+		for _, token := range strings.Fields(line) {
+			if idx := strings.Index(token, "="); idx > 0 {
+				key := token[:idx]
+				val := token[idx+1:]
+				if key != "" && val != "" {
+					count++
+				}
+			}
+		}
+	}
+	return count
+}
+
+func DeriveDetailed(content string) (map[string]string, string, DeriveStats) {
 	dims := make(map[string]string)
+	stats := DeriveStats{}
 
 	for _, line := range strings.Split(content, "\n") {
 		line = strings.TrimSpace(line)
@@ -58,6 +90,7 @@ func Derive(content string) (map[string]string, string) {
 			val := strings.TrimSpace(line[idx+2:])
 			if isSimpleKey(key) && val != "" {
 				dims[key] = val
+				stats.ExplicitCount++
 				continue
 			}
 		}
@@ -68,6 +101,7 @@ func Derive(content string) (map[string]string, string) {
 				val := token[idx+1:]
 				if key != "" && val != "" {
 					dims[key] = val
+					stats.ExplicitCount++
 				}
 			}
 		}
@@ -77,6 +111,7 @@ func Derive(content string) (map[string]string, string) {
 	for k, v := range deriveProse(content) {
 		if _, exists := dims[k]; !exists {
 			dims[k] = v
+			stats.ProseCount++
 		}
 	}
 
@@ -90,7 +125,43 @@ func Derive(content string) (map[string]string, string) {
 	for i, k := range keys {
 		parts[i] = k + "=" + dims[k]
 	}
-	return dims, strings.Join(parts, " ")
+	return dims, strings.Join(parts, " "), stats
+}
+
+// Derive parses key=value and "key: value" pairs from content and returns
+// a map of the extracted dimensions and a deterministic serialized key=value string.
+func Derive(content string) (map[string]string, string) {
+	dims, serialized, _ := DeriveDetailed(content)
+	return dims, serialized
+}
+
+// CompressIfSafe returns a compressed identity string only when derivation
+// quality is high enough that replacing the original content is unlikely to
+// discard important instructions. Structured inputs are allowed through more
+// aggressively than prose; prose requires more derived signal and reasonable
+// coverage before replacement.
+func CompressIfSafe(content string) (string, bool) {
+	content = strings.TrimSpace(content)
+	if content == "" {
+		return "", false
+	}
+	dims, serialized, stats := DeriveDetailed(content)
+	if len(dims) == 0 || serialized == "" || len(serialized) >= len(content) {
+		return "", false
+	}
+
+	if stats.ExplicitCount >= 2 {
+		return serialized, true
+	}
+
+	if stats.ProseCount >= 3 {
+		coverageRatio := float64(len(serialized)) / float64(len(content))
+		if coverageRatio >= 0.35 {
+			return serialized, true
+		}
+	}
+
+	return "", false
 }
 
 // isSimpleKey returns true if s looks like a plain identifier (no spaces, no special chars).

@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/pythondatascrape/engram/internal/identity/codebook"
 )
 
 type openaiRequest struct {
@@ -20,6 +22,10 @@ type openAIInputEnvelope struct {
 	Raw     json.RawMessage
 	Message AnthropicMessage
 	Type    string
+}
+
+type openAIIdentityStats struct {
+	SavedTokens int
 }
 
 // estimateOpenAITokens counts characters ÷ 4 across all message/input content strings
@@ -69,6 +75,29 @@ func decodeOpenAIChatMessages(raw json.RawMessage) ([]AnthropicMessage, bool) {
 	return nil, false
 }
 
+func compressOpenAIIdentityMessages(messages []AnthropicMessage) ([]AnthropicMessage, int) {
+	if len(messages) == 0 {
+		return messages, 0
+	}
+	out := make([]AnthropicMessage, len(messages))
+	saved := 0
+	for i, msg := range messages {
+		out[i] = msg
+		if msg.Role != "system" && msg.Role != "developer" {
+			continue
+		}
+		content, ok := msg.Content.(string)
+		if !ok {
+			continue
+		}
+		if compressed, ok := codebook.CompressIfSafe(content); ok {
+			out[i].Content = compressed
+			saved += len(content)/4 - len(compressed)/4
+		}
+	}
+	return out, saved
+}
+
 func decodeOpenAIInputMessages(raw json.RawMessage) ([]AnthropicMessage, bool) {
 	envelopes, ok := decodeOpenAIInputEnvelopes(raw)
 	if !ok {
@@ -82,6 +111,13 @@ func estimateInstructionsTokens(instructions string) int {
 		return 0
 	}
 	return len(instructions) / 4
+}
+
+func compressOpenAIInstructions(instructions string) (string, int) {
+	if compressed, ok := codebook.CompressIfSafe(instructions); ok {
+		return compressed, len(instructions)/4 - len(compressed)/4
+	}
+	return instructions, 0
 }
 
 func fallbackOpenAISessionID(rawBody []byte) string {
@@ -373,6 +409,8 @@ func compressOpenAIInput(raw json.RawMessage, windowSize, budgetTokens int) (jso
 		return raw, nil, nil, false
 	}
 
+	envelopes, identityStats := compressOpenAIIdentityEnvelopes(envelopes)
+	_ = identityStats
 	original := envelopeMessages(envelopes)
 	compressed := Compress(original, windowSize)
 	if EstimateTokens(compressed) > budgetTokens {
@@ -398,6 +436,58 @@ func compressOpenAIInput(raw json.RawMessage, windowSize, budgetTokens int) (jso
 		return raw, original, compressed, true
 	}
 	return out, original, compressed, true
+}
+
+func compressOpenAIIdentityEnvelopes(envelopes []openAIInputEnvelope) ([]openAIInputEnvelope, openAIIdentityStats) {
+	if len(envelopes) == 0 {
+		return envelopes, openAIIdentityStats{}
+	}
+	out := make([]openAIInputEnvelope, len(envelopes))
+	stats := openAIIdentityStats{}
+	for i, env := range envelopes {
+		out[i] = env
+		if env.Type != "message" {
+			continue
+		}
+		if env.Message.Role != "system" && env.Message.Role != "developer" {
+			continue
+		}
+		rawCompressed, compressedMessage, saved, ok := compressOpenAIIdentityEnvelope(env.Raw)
+		if !ok {
+			continue
+		}
+		out[i].Raw = rawCompressed
+		out[i].Message = compressedMessage
+		stats.SavedTokens += saved
+	}
+	return out, stats
+}
+
+func compressOpenAIIdentityEnvelope(raw json.RawMessage) (json.RawMessage, AnthropicMessage, int, bool) {
+	var item map[string]any
+	if json.Unmarshal(raw, &item) != nil {
+		return nil, AnthropicMessage{}, 0, false
+	}
+	role, _ := item["role"].(string)
+	if role != "system" && role != "developer" {
+		return nil, AnthropicMessage{}, 0, false
+	}
+	originalText := ""
+	if content, ok := item["content"]; ok {
+		if b, err := json.Marshal(content); err == nil {
+			originalText = extractRawContentText(b)
+		}
+	}
+	if originalText == "" {
+		return nil, AnthropicMessage{}, 0, false
+	}
+	compressed, ok := codebook.CompressIfSafe(originalText)
+	if !ok {
+		return nil, AnthropicMessage{}, 0, false
+	}
+	item["content"] = compressed
+	rawCompressed := mustMarshalJSON(item)
+	return rawCompressed, AnthropicMessage{Role: role, Content: compressed}, len(originalText)/4 - len(compressed)/4, true
 }
 
 func marshalResponsesSummaryMessage(msg AnthropicMessage) json.RawMessage {
