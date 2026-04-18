@@ -18,6 +18,7 @@ func TestGenerateLaunchdPlist(t *testing.T) {
 	plist := generateLaunchdPlist("/usr/local/bin/engram", "/Users/test/.engram/engram.yaml", "/Users/test/.engram/engram.sock")
 	assert.Contains(t, plist, "com.engram.daemon")
 	assert.Contains(t, plist, "/usr/local/bin/engram")
+	assert.Contains(t, plist, "<string>--foreground</string>")
 	assert.Contains(t, plist, "<key>RunAtLoad</key>")
 	assert.Contains(t, plist, "<true/>")
 }

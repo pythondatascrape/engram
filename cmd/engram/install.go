@@ -27,6 +27,7 @@ const launchdPlistTemplate = `<?xml version="1.0" encoding="UTF-8"?>
 	<array>
 		<string>{{.Binary}}</string>
 		<string>serve</string>
+		<string>--foreground</string>
 		<string>--config</string>
 		<string>{{.ConfigPath}}</string>
 		<string>--socket</string>
