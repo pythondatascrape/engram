@@ -16,6 +16,32 @@ async function readStdin() {
   });
 }
 
+export function extractToolFields(payload) {
+  if (!payload || typeof payload !== 'object') {
+    return { toolName: '', toolOutput: '' };
+  }
+
+  const toolNameCandidates = [
+    payload.tool_name,
+    payload.toolName,
+    payload.name,
+    payload.tool?.name,
+  ];
+  const toolOutputCandidates = [
+    payload.tool_output,
+    payload.toolOutput,
+    payload.output,
+    payload.result,
+    payload.tool?.output,
+    payload.tool_result?.output,
+  ];
+
+  const toolName = toolNameCandidates.find((v) => typeof v === 'string' && v) ?? '';
+  const toolOutput = toolOutputCandidates.find((v) => typeof v === 'string' && v) ?? '';
+
+  return { toolName, toolOutput };
+}
+
 /**
  * Core hook logic. Injectable for testing:
  *   clientFactory() returns a DaemonClient-compatible object.
@@ -28,15 +54,21 @@ export async function run(clientFactory = () => new DaemonClient(), stdinFn = re
   let payload;
   try { payload = JSON.parse(raw); } catch { return; }
 
-  const toolName = typeof payload.tool_name === 'string' ? payload.tool_name : '';
-  const toolOutput = typeof payload.tool_output === 'string' ? payload.tool_output : '';
+  const { toolName, toolOutput } = extractToolFields(payload);
 
   if (toolName.startsWith(OWN_TOOL_PREFIX)) return;
   if (!toolOutput || toolOutput.length < MIN_CHARS_TO_CHECK) return;
 
   const client = clientFactory();
   try {
-    await client.call('engram.checkRedundancy', { content: toolOutput });
+    const result = await client.call('engram.checkRedundancy', { content: toolOutput });
+    if (result?.isRedundant) {
+      const kind = typeof result.kind === 'string' && result.kind ? result.kind : 'redundant';
+      const message = {
+        message: `Engram redundancy check detected ${kind} tool output. Do not restate the full tool output. Prefer a concise delta-only summary and only quote the minimum necessary lines.`,
+      };
+      process.stdout.write(JSON.stringify(message) + '\n');
+    }
   } catch {
     // Daemon may not be running — fail silently, never surface to Claude
   } finally {

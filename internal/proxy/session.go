@@ -23,10 +23,18 @@ func SessionID(systemPrompt string) string {
 	return fmt.Sprintf("proxy-%x", h[:8])
 }
 
-// WriteStats writes ctx_orig and ctx_comp to sessionsDir/<sessionID>.ctx.json.
-// This file is owned exclusively by the proxy — the stop hook writes to
-// <sessionID>.json — so no cross-process coordination is needed.
-// Writes are atomic via tmp+rename.
+// ctxStats is the on-disk structure for proxy-measured context token accounting.
+type ctxStats struct {
+	CtxOrig int `json:"ctx_orig"`
+	CtxComp int `json:"ctx_comp"`
+	Turns   int `json:"turns"`
+}
+
+// WriteStats accumulates ctx_orig and ctx_comp in sessionsDir/<sessionID>.ctx.json.
+// Each call adds the current request's token counts to the running totals and
+// increments the turn counter. This file is owned exclusively by the proxy —
+// the stop hook writes to <sessionID>.json — so no cross-process coordination
+// is needed. Writes are atomic via tmp+rename.
 func WriteStats(sessionsDir, sessionID string, ctxOrig, ctxComp int) error {
 	mu.Lock()
 	defer mu.Unlock()
@@ -37,10 +45,16 @@ func WriteStats(sessionsDir, sessionID string, ctxOrig, ctxComp int) error {
 
 	path := filepath.Join(sessionsDir, sessionID+".ctx.json")
 
-	data, err := json.MarshalIndent(map[string]int{
-		"ctx_orig": ctxOrig,
-		"ctx_comp": ctxComp,
-	}, "", "  ")
+	// Load existing totals (if any) and accumulate.
+	var stats ctxStats
+	if raw, err := os.ReadFile(path); err == nil {
+		_ = json.Unmarshal(raw, &stats) // ignore errors; start fresh on corrupt file
+	}
+	stats.CtxOrig += ctxOrig
+	stats.CtxComp += ctxComp
+	stats.Turns++
+
+	data, err := json.MarshalIndent(stats, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal ctx stats: %w", err)
 	}

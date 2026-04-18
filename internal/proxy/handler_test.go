@@ -12,20 +12,44 @@ import (
 	"testing"
 )
 
-// fakeAnthropic returns a minimal non-streaming Anthropic response and
-// records the request body it received for later inspection.
+// fakeAnthropic returns a minimal non-streaming Anthropic response (with usage)
+// and records the request body it received for later inspection. Also handles
+// /v1/messages/count_tokens by estimating tokens from the request body size.
 func fakeAnthropic(t *testing.T) (*httptest.Server, *[]byte) {
 	t.Helper()
 	var received []byte
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
+
+		// Handle count_tokens endpoint.
+		if r.URL.Path == "/v1/messages/count_tokens" {
+			// Estimate tokens from the body to simulate the real API.
+			// Use len/4 as a rough stand-in for the real tokenizer.
+			tokens := len(body) / 4
+			if tokens < 1 {
+				tokens = 1
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]int{"input_tokens": tokens})
+			return
+		}
+
 		received = body
 		w.Header().Set("Content-Type", "application/json")
+		// Estimate input tokens from the compressed body size for usage.
+		inputTokens := len(body) / 4
+		if inputTokens < 1 {
+			inputTokens = 1
+		}
 		resp := map[string]any{
 			"id":   "test",
 			"type": "message",
 			"content": []map[string]any{
 				{"type": "text", "text": "ok"},
+			},
+			"usage": map[string]any{
+				"input_tokens":  inputTokens,
+				"output_tokens": 5,
 			},
 		}
 		_ = json.NewEncoder(w).Encode(resp)
@@ -48,6 +72,7 @@ func makeMessages(n int) []AnthropicMessage {
 func postMessages(t *testing.T, handler http.Handler, msgs []AnthropicMessage, system string, extraHeaders map[string]string) *http.Response {
 	t.Helper()
 	body := map[string]any{
+		"model":    "claude-sonnet-4-20250514",
 		"messages": msgs,
 		"system":   system,
 		"stream":   false,
@@ -125,6 +150,59 @@ func TestMessagesCompressed(t *testing.T) {
 	}
 	if !strings.HasPrefix(first, "[CONTEXT_SUMMARY]") {
 		t.Fatalf("expected [CONTEXT_SUMMARY] prefix, got: %s", first[:50])
+	}
+}
+
+// TestCompressedBodyPreservesAllFields verifies that compression only patches
+// the "messages" field and preserves all other original request fields like
+// max_tokens, tools, temperature, etc.
+func TestCompressedBodyPreservesAllFields(t *testing.T) {
+	srv, received := fakeAnthropic(t)
+	defer srv.Close()
+
+	done := make(chan struct{}, 1)
+	h := NewHandler(5, t.TempDir(), srv.URL)
+	h.afterStats = func() { done <- struct{}{} }
+
+	// Build a request body with extra fields that anthropicRequest doesn't model.
+	msgs := makeMessages(15)
+	body := map[string]any{
+		"model":       "claude-sonnet-4-20250514",
+		"messages":    msgs,
+		"system":      "sys",
+		"stream":      false,
+		"max_tokens":  4096,
+		"temperature": 0.7,
+		"tools":       []map[string]any{{"name": "my_tool", "description": "test"}},
+	}
+	b, _ := json.Marshal(body)
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(string(b)))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer sk-test")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	<-done
+
+	// Parse what the upstream server received.
+	var got map[string]json.RawMessage
+	if err := json.Unmarshal(*received, &got); err != nil {
+		t.Fatalf("parse received body: %v", err)
+	}
+
+	// Verify extra fields are preserved.
+	for _, key := range []string{"max_tokens", "temperature", "tools"} {
+		if _, ok := got[key]; !ok {
+			t.Errorf("field %q was dropped from compressed body", key)
+		}
+	}
+
+	// Verify messages were still compressed.
+	var parsedMsgs []AnthropicMessage
+	if err := json.Unmarshal(got["messages"], &parsedMsgs); err != nil {
+		t.Fatalf("parse messages: %v", err)
+	}
+	if len(parsedMsgs) != 6 {
+		t.Fatalf("expected 6 messages (1 summary + 5 tail), got %d", len(parsedMsgs))
 	}
 }
 
@@ -208,15 +286,39 @@ func TestStatsWritten(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read stats file: %v", err)
 	}
-	var stats map[string]any
+	var stats ctxStats
 	if err := json.Unmarshal(data, &stats); err != nil {
 		t.Fatalf("parse stats: %v", err)
 	}
-	if _, ok := stats["ctx_orig"]; !ok {
-		t.Error("missing ctx_orig")
+	if stats.CtxOrig == 0 {
+		t.Error("ctx_orig should be > 0")
 	}
-	if _, ok := stats["ctx_comp"]; !ok {
-		t.Error("missing ctx_comp")
+	if stats.CtxComp == 0 {
+		t.Error("ctx_comp should be > 0")
+	}
+	if stats.Turns != 1 {
+		t.Errorf("turns = %d, want 1", stats.Turns)
+	}
+
+	// Send a second request and verify accumulation.
+	postMessages(t, h, makeMessages(10), "statstest", map[string]string{
+		"X-Engram-Session": "stats-session",
+	})
+	<-done
+
+	data2, err := os.ReadFile(filepath.Join(dir, "stats-session.ctx.json"))
+	if err != nil {
+		t.Fatalf("read stats file (2nd): %v", err)
+	}
+	var stats2 ctxStats
+	if err := json.Unmarshal(data2, &stats2); err != nil {
+		t.Fatalf("parse stats (2nd): %v", err)
+	}
+	if stats2.Turns != 2 {
+		t.Errorf("turns after 2 calls = %d, want 2", stats2.Turns)
+	}
+	if stats2.CtxOrig <= stats.CtxOrig {
+		t.Errorf("ctx_orig should accumulate: %d <= %d", stats2.CtxOrig, stats.CtxOrig)
 	}
 }
 
@@ -286,9 +388,9 @@ func TestRegisterSessionEndpoint(t *testing.T) {
 	if got := h.claimPendingSession(); got != "abc-123" {
 		t.Fatalf("claimPendingSession() = %q, want %q", got, "abc-123")
 	}
-	// Second claim must be empty.
-	if got := h.claimPendingSession(); got != "" {
-		t.Fatalf("expected empty after claim, got %q", got)
+	// Second claim must still return the same session (persistent, not consumed).
+	if got := h.claimPendingSession(); got != "abc-123" {
+		t.Fatalf("expected persistent session %q, got %q", "abc-123", got)
 	}
 }
 
@@ -371,10 +473,7 @@ func TestStatsIncludeSystemPrompt(t *testing.T) {
 		t.Fatalf("read stats file: %v", err)
 	}
 
-	var stats struct {
-		CtxOrig int `json:"ctx_orig"`
-		CtxComp int `json:"ctx_comp"`
-	}
+	var stats ctxStats
 	if err := json.Unmarshal(data, &stats); err != nil {
 		t.Fatalf("parse stats: %v", err)
 	}
@@ -386,6 +485,9 @@ func TestStatsIncludeSystemPrompt(t *testing.T) {
 	}
 	if stats.CtxComp < 100 {
 		t.Errorf("ctxComp should include system prompt tokens; got %d, want >= 100", stats.CtxComp)
+	}
+	if stats.Turns != 1 {
+		t.Errorf("turns = %d, want 1", stats.Turns)
 	}
 }
 
@@ -421,10 +523,7 @@ func TestSystemArrayCountsTokensAndFingerprintFallback(t *testing.T) {
 		t.Fatalf("read stats file: %v", err)
 	}
 
-	var stats struct {
-		CtxOrig int `json:"ctx_orig"`
-		CtxComp int `json:"ctx_comp"`
-	}
+	var stats ctxStats
 	if err := json.Unmarshal(data, &stats); err != nil {
 		t.Fatalf("parse stats: %v", err)
 	}

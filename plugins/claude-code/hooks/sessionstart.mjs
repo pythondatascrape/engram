@@ -15,6 +15,8 @@ import { readFileSync } from 'fs';
 import { dirname, join } from 'path';
 import { homedir } from 'os';
 import { createInterface } from 'readline';
+import { fileURLToPath } from 'url';
+import { DaemonClient } from '../lib/daemon-client.mjs';
 
 async function readStdin() {
   if (process.stdin.isTTY) return '';
@@ -24,6 +26,17 @@ async function readStdin() {
     rl.on('line', (line) => lines.push(line));
     rl.on('close', () => resolve(lines.join('\n')));
   });
+}
+
+export function extractSessionId(payload) {
+  if (!payload || typeof payload !== 'object') return '';
+  if (typeof payload.session_id === 'string' && payload.session_id) return payload.session_id;
+  if (typeof payload.sessionId === 'string' && payload.sessionId) return payload.sessionId;
+  if (payload.session && typeof payload.session === 'object') {
+    if (typeof payload.session.id === 'string' && payload.session.id) return payload.session.id;
+    if (typeof payload.session.session_id === 'string' && payload.session.session_id) return payload.session.session_id;
+  }
+  return '';
 }
 
 function collectClaudeMd(startDir) {
@@ -56,24 +69,49 @@ async function registerSession(sessionId) {
     const portStr = readFileSync(portFile, 'utf8').trim();
     const port = parseInt(portStr, 10);
     if (isNaN(port) || port < 1 || port > 65535) return;
-    await fetch(`http://localhost:${port}/internal/register-session`, {
+    const resp = await fetch(`http://localhost:${port}/internal/register-session`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ session_id: sessionId }),
       signal: AbortSignal.timeout(1000),
     });
+    if (!resp.ok) return;
   } catch {
     // Proxy not running or port file absent — not an error for this hook.
   }
 }
 
-async function main() {
-  const raw = await readStdin();
+function estimateTokens(text) {
+  return Math.max(1, Math.floor((text?.length ?? 0) / 4));
+}
+
+export async function buildCompressedIdentity(clientFactory, content) {
+  const client = clientFactory();
+  try {
+    const derived = await client.call('engram.deriveCodebook', { content });
+    const dimensions = derived?.codebook ?? {};
+    const compressed = await client.call('engram.compressIdentity', {
+      dimensions,
+      originalTokens: estimateTokens(content),
+    });
+    return compressed?.block ?? '';
+  } finally {
+    client.disconnect();
+  }
+}
+
+export async function run(
+  stdinFn = readStdin,
+  registerSessionFn = registerSession,
+  collectClaudeMdFn = collectClaudeMd,
+  clientFactory = () => new DaemonClient(),
+) {
+  const raw = await stdinFn();
   let sessionId = '';
   if (raw.trim()) {
     try {
       const payload = JSON.parse(raw);
-      if (typeof payload.session_id === 'string') sessionId = payload.session_id;
+      sessionId = extractSessionId(payload);
     } catch {
       // ignore malformed stdin
     }
@@ -81,22 +119,34 @@ async function main() {
 
   // Always register with proxy so context stats are attributed to the correct
   // session UUID even when there are no CLAUDE.md files to inject.
-  await registerSession(sessionId);
+  await registerSessionFn(sessionId);
 
   const projectDir = process.env.CLAUDE_PROJECT_DIR;
-  if (!projectDir) process.exit(0);
+  if (!projectDir) return;
 
-  const files = collectClaudeMd(projectDir);
-  if (files.length === 0) process.exit(0);
+  const files = collectClaudeMdFn(projectDir);
+  if (files.length === 0) return;
 
   const combinedContent = files.map((f) => f.content).join('\n');
-  if (!combinedContent.trim()) process.exit(0);
+  if (!combinedContent.trim()) return;
+
+  let identityBlock = '';
+  try {
+    identityBlock = await buildCompressedIdentity(clientFactory, combinedContent);
+  } catch {
+    // Daemon may not be running yet or compression may fail — keep hook fail-open.
+  }
 
   const fileList = files.map((f) => f.path).join(', ');
+  const derivedNote = identityBlock
+    ? `Engram directly compressed the project identity for this session from ${files.length} file(s): ${fileList}.\n\nUse this compressed identity block as the session identity context:\n\n${identityBlock}`
+    : `Found CLAUDE.md with ${combinedContent.length} chars (${files.length} file(s): ${fileList}). Engram could not directly compress identity in the hook, so please derive and compress the project identity for this session.`;
   const message = {
-    message: `Found CLAUDE.md with ${combinedContent.length} chars (${files.length} file(s): ${fileList}). Deriving codebook for identity compression. Please call mcp__engram-ccode__derive_codebook with the CLAUDE.md content, then call mcp__engram-ccode__compress_identity to compress the project identity for this session.`,
+    message: derivedNote,
   };
   process.stdout.write(JSON.stringify(message) + '\n');
 }
 
-main().catch(() => process.exit(0));
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  run().then(() => process.exit(0)).catch(() => process.exit(0));
+}

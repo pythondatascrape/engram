@@ -88,9 +88,9 @@ func TestWriteStats_OnlyWritesCtxFields(t *testing.T) {
 	data, _ := os.ReadFile(filepath.Join(dir, "only-ctx.ctx.json"))
 	var got map[string]any
 	json.Unmarshal(data, &got)
-	// Exactly two keys.
-	if len(got) != 2 {
-		t.Errorf("ctx file should contain exactly ctx_orig and ctx_comp, got keys: %v", got)
+	// Exactly three keys: ctx_orig, ctx_comp, turns.
+	if len(got) != 3 {
+		t.Errorf("ctx file should contain exactly ctx_orig, ctx_comp, and turns, got keys: %v", got)
 	}
 }
 

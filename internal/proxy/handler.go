@@ -63,18 +63,18 @@ func (h *Handler) registerSession(id string) bool {
 	return true
 }
 
-// claimPendingSession atomically reads and clears the pending session ID.
+// claimPendingSession atomically reads the pending session ID.
 // Returns "" if no session has been registered.
 func (h *Handler) claimPendingSession() string {
 	h.pendingMu.Lock()
 	defer h.pendingMu.Unlock()
 	id := h.pendingSession
-	h.pendingSession = ""
 	return id
 }
 
 // anthropicRequest is the subset of the Anthropic messages request we care about.
 type anthropicRequest struct {
+	Model     string             `json:"model"`
 	Messages  []AnthropicMessage `json:"messages"`
 	RawSystem json.RawMessage    `json:"system"`
 	System    string             `json:"-"` // extracted text from RawSystem
@@ -109,6 +109,83 @@ func (r *anthropicRequest) extractSystem() {
 		}
 		r.System = strings.Join(parts, "\n")
 	}
+}
+
+// countTokens calls the Anthropic /v1/messages/count_tokens endpoint to get an
+// exact input token count for the given request body. Returns -1 on any error
+// so callers can fall back to estimation.
+func (h *Handler) countTokens(rawBody []byte, srcHeaders http.Header) int {
+	url := h.upstream + "/v1/messages/count_tokens"
+	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(rawBody))
+	if err != nil {
+		slog.Debug("proxy: countTokens request creation failed", "err", err)
+		return -1
+	}
+	// Clone auth and version headers from the original request.
+	for _, key := range []string{"Authorization", "X-Api-Key", "Anthropic-Version", "Content-Type"} {
+		if v := srcHeaders.Get(key); v != "" {
+			req.Header.Set(key, v)
+		}
+	}
+	req.ContentLength = int64(len(rawBody))
+
+	resp, err := h.client.Do(req)
+	if err != nil {
+		slog.Debug("proxy: countTokens request failed", "err", err)
+		return -1
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		slog.Debug("proxy: countTokens non-200", "status", resp.StatusCode)
+		return -1
+	}
+
+	var result struct {
+		InputTokens int `json:"input_tokens"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		slog.Debug("proxy: countTokens decode failed", "err", err)
+		return -1
+	}
+	return result.InputTokens
+}
+
+// parseUsageInputTokens extracts usage.input_tokens from a captured response
+// body. Handles both non-streaming JSON responses and SSE streaming responses
+// (where the final message_delta event contains usage). Returns -1 on failure.
+func parseUsageInputTokens(body []byte) int {
+	// Try non-streaming JSON first.
+	var resp struct {
+		Usage struct {
+			InputTokens int `json:"input_tokens"`
+		} `json:"usage"`
+	}
+	if json.Unmarshal(body, &resp) == nil && resp.Usage.InputTokens > 0 {
+		return resp.Usage.InputTokens
+	}
+
+	// Try SSE: scan for the message_start event which contains the full usage.
+	// Format: "data: {... "usage":{"input_tokens":N,...} ...}"
+	for _, line := range strings.Split(string(body), "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "data: ") {
+			continue
+		}
+		data := strings.TrimPrefix(line, "data: ")
+		var event struct {
+			Type    string `json:"type"`
+			Message struct {
+				Usage struct {
+					InputTokens int `json:"input_tokens"`
+				} `json:"usage"`
+			} `json:"message"`
+		}
+		if json.Unmarshal([]byte(data), &event) == nil && event.Type == "message_start" && event.Message.Usage.InputTokens > 0 {
+			return event.Message.Usage.InputTokens
+		}
+	}
+	return -1
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -156,6 +233,13 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	req.extractSystem()
 
+	slog.Info("proxy: intercepted /v1/messages",
+		"num_messages", len(req.Messages),
+		"system_len", len(req.System),
+		"raw_system_len", len(req.RawSystem),
+		"model", req.Model,
+		"body_len", len(rawBody))
+
 	// Determine session ID. Prefer the UUID registered by the sessionstart hook
 	// (via /internal/register-session). Fall back to the system-prompt fingerprint
 	// when no session was registered (e.g. proxy running without the hook).
@@ -170,22 +254,56 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Measure before and after compression.
-	// Include the system prompt in token estimates — it's the largest payload
-	// component but is not compressed by the proxy.
-	systemTokens := len(req.System) / 4
-	ctxOrig := EstimateTokens(req.Messages) + systemTokens
-	req.Messages = Compress(req.Messages, h.windowSize)
-	ctxComp := EstimateTokens(req.Messages) + systemTokens
+	// Get exact uncompressed token count from the count_tokens API.
+	// This runs before compression so it measures the original payload.
+	ctxOrig := h.countTokens(rawBody, r.Header)
+	if ctxOrig < 0 {
+		// Fallback to estimation if count_tokens is unavailable.
+		systemTokens := len(req.System) / 4
+		ctxOrig = EstimateTokens(req.Messages) + systemTokens
+		slog.Debug("proxy: countTokens unavailable, using estimate",
+			"session", sessionID, "estimate", ctxOrig)
+	} else {
+		slog.Debug("proxy: exact token count (uncompressed)",
+			"session", sessionID, "input_tokens", ctxOrig)
+	}
 
-	// Re-encode.
-	newBody, err := json.Marshal(req)
+	req.Messages = Compress(req.Messages, h.windowSize)
+
+	// Re-encode by patching only the "messages" field in the original body.
+	// This preserves all fields (max_tokens, tools, temperature, etc.) that
+	// anthropicRequest does not model.
+	compressedMsgs, err := json.Marshal(req.Messages)
+	if err != nil {
+		h.forwardVerbatim(w, r, rawBody)
+		return
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(rawBody, &raw); err != nil {
+		h.forwardVerbatim(w, r, rawBody)
+		return
+	}
+	raw["messages"] = compressedMsgs
+	newBody, err := json.Marshal(raw)
 	if err != nil {
 		h.forwardVerbatim(w, r, rawBody)
 		return
 	}
 
-	h.forwardWithBody(w, r, newBody)
+	respBody := h.forwardWithBody(w, r, newBody)
+
+	// Extract exact compressed token count from the API response usage field.
+	ctxComp := parseUsageInputTokens(respBody)
+	if ctxComp < 0 {
+		// Fallback to estimation.
+		systemTokens := len(req.System) / 4
+		ctxComp = EstimateTokens(req.Messages) + systemTokens
+		slog.Debug("proxy: response usage unavailable, using estimate",
+			"session", sessionID, "estimate", ctxComp)
+	} else {
+		slog.Debug("proxy: exact token count (compressed)",
+			"session", sessionID, "input_tokens", ctxComp)
+	}
 
 	// Write stats asynchronously after response.
 	go func() {
@@ -209,13 +327,14 @@ func (h *Handler) forwardVerbatim(w http.ResponseWriter, r *http.Request, body [
 	h.forwardWithBody(w, r, body)
 }
 
-// forwardWithBody sends the request upstream with the provided body and streams the response back.
-func (h *Handler) forwardWithBody(w http.ResponseWriter, r *http.Request, body []byte) {
+// forwardWithBody sends the request upstream with the provided body and streams
+// the response back. Returns the captured response body for usage extraction.
+func (h *Handler) forwardWithBody(w http.ResponseWriter, r *http.Request, body []byte) []byte {
 	upstreamURL := h.upstream + r.URL.RequestURI()
 	upstreamReq, err := http.NewRequestWithContext(r.Context(), r.Method, upstreamURL, bytes.NewReader(body))
 	if err != nil {
 		http.Error(w, "failed to create upstream request", http.StatusBadGateway)
-		return
+		return nil
 	}
 
 	// Clone headers, then drop internal/computed ones before forwarding.
@@ -229,7 +348,7 @@ func (h *Handler) forwardWithBody(w http.ResponseWriter, r *http.Request, body [
 	resp, err := h.client.Do(upstreamReq)
 	if err != nil {
 		http.Error(w, "upstream request failed: "+err.Error(), http.StatusBadGateway)
-		return
+		return nil
 	}
 	defer resp.Body.Close()
 
@@ -242,12 +361,15 @@ func (h *Handler) forwardWithBody(w http.ResponseWriter, r *http.Request, body [
 	w.WriteHeader(resp.StatusCode)
 
 	// Stream response body, flushing as we go (handles SSE and regular JSON).
+	// Capture a copy for usage extraction.
+	var captured bytes.Buffer
 	flusher, canFlush := w.(http.Flusher)
 	buf := make([]byte, 4096)
 	for {
 		n, readErr := resp.Body.Read(buf)
 		if n > 0 {
 			_, _ = w.Write(buf[:n])
+			captured.Write(buf[:n])
 			if canFlush {
 				flusher.Flush()
 			}
@@ -256,4 +378,5 @@ func (h *Handler) forwardWithBody(w http.ResponseWriter, r *http.Request, body [
 			break
 		}
 	}
+	return captured.Bytes()
 }

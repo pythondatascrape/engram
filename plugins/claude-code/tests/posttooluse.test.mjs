@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { run } from '../hooks/posttooluse.mjs';
+import { extractToolFields, run } from '../hooks/posttooluse.mjs';
 
 const LONG = 'x'.repeat(800);
 
@@ -15,6 +15,17 @@ class MockClient {
 }
 
 describe('posttooluse', () => {
+  it('extracts alternate tool payload fields', () => {
+    assert.deepEqual(
+      extractToolFields({ toolName: 'bash', output: LONG }),
+      { toolName: 'bash', toolOutput: LONG },
+    );
+    assert.deepEqual(
+      extractToolFields({ tool: { name: 'bash', output: LONG } }),
+      { toolName: 'bash', toolOutput: LONG },
+    );
+  });
+
   it('does nothing for short output', async () => {
     const client = new MockClient();
     await run(() => client, makeStdin({ tool_name: 'bash', tool_output: 'short' }));
@@ -34,6 +45,40 @@ describe('posttooluse', () => {
     assert.equal(client.calls[0].method, 'engram.checkRedundancy');
     assert.equal(client.calls[0].params.content, LONG);
     assert.equal(client.disconnected, true);
+  });
+
+  it('calls engram.checkRedundancy for alternate payload field names', async () => {
+    const client = new MockClient();
+    await run(() => client, makeStdin({ toolName: 'bash', output: LONG }));
+    assert.equal(client.calls.length, 1);
+    assert.equal(client.calls[0].method, 'engram.checkRedundancy');
+    assert.equal(client.calls[0].params.content, LONG);
+  });
+
+  it('emits a guidance message when redundancy is detected', async () => {
+    class RedundantClient extends MockClient {
+      async call(method, params) {
+        this.calls.push({ method, params });
+        return { isRedundant: true, kind: 'normalized' };
+      }
+    }
+
+    const client = new RedundantClient();
+    const origWrite = process.stdout.write;
+    let output = '';
+    process.stdout.write = (chunk) => {
+      output += String(chunk);
+      return true;
+    };
+
+    try {
+      await run(() => client, makeStdin({ tool_name: 'bash', tool_output: LONG }));
+    } finally {
+      process.stdout.write = origWrite;
+    }
+
+    const parsed = JSON.parse(output.trim());
+    assert.match(parsed.message, /redundancy check detected normalized tool output/);
   });
 
   it('silently ignores daemon connection errors', async () => {
