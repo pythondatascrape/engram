@@ -18,6 +18,18 @@ Engram applies three compression stages:
 2. **Context compression** — Older conversation history is collapsed into a `[CONTEXT_SUMMARY]` block at the local HTTP proxy while the most recent turns remain verbatim.
 3. **Redundancy control** — Large tool outputs are checked for repeated content so Claude can respond with concise delta-only summaries instead of restating everything.
 
+```mermaid
+flowchart LR
+    A["Claude Code request<br/>15 prior messages"] --> B["Engram Proxy"]
+    B --> C["Keep recent window<br/>last 10 messages"]
+    B --> D["Compress older head<br/>first 5 messages"]
+    D --> E["[CONTEXT_SUMMARY]<br/>user: ...<br/>assistant: ..."]
+    C --> F["Tail messages unchanged"]
+    E --> G["Rewritten request"]
+    F --> G
+    G --> H["Anthropic / Claude API"]
+```
+
 ### Key Numbers
 
 | Metric | Value |
