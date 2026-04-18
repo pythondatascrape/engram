@@ -14,9 +14,9 @@ Engram eliminates it. It runs locally as a lightweight daemon and compresses bot
 
 Engram applies three compression stages:
 
-1. **Identity compression** — Verbose CLAUDE.md prose and project instructions are reduced to compact `key=value` codebook entries. Definitions are sent once on the first turn; subsequent turns reference keys only.
-2. **Context compression** — Conversation history is serialized using a learned codebook that strips JSON overhead from message objects (`role=user content=...` instead of full JSON).
-3. **Response compression** — LLM responses are compressed using provider-specific codebooks tuned to Anthropic and OpenAI output patterns.
+1. **Identity compression** — Verbose `CLAUDE.md` prose and project instructions are derived into a compact codebook and compressed directly at session start.
+2. **Context compression** — Older conversation history is collapsed into a `[CONTEXT_SUMMARY]` block at the local HTTP proxy while the most recent turns remain verbatim.
+3. **Redundancy control** — Large tool outputs are checked for repeated content so Claude can respond with concise delta-only summaries instead of restating everything.
 
 ### Key Numbers
 
@@ -59,7 +59,7 @@ Starting in v0.3.0, a single install command handles everything:
 6. Verifies the daemon socket and proxy are reachable
 7. **Exits non-zero if any step fails** — no silent partial installs
 
-After install, restart Claude Code. No `engram serve` step required.
+After install, restart Claude Code. No `engram serve` step is required for normal use.
 
 ## CLI Reference
 
@@ -91,7 +91,14 @@ engram install --claude-code
 # Restart Claude Code — compression is active immediately
 ```
 
-Engram registers as a Claude Code plugin and routes all LLM calls through the local proxy. Context is compressed transparently — no workflow changes needed.
+Engram registers as a Claude Code plugin, starts the local background service, and routes Claude requests through the local proxy. In a fresh session:
+
+- the `SessionStart` hook registers the real Claude session ID with the proxy
+- `CLAUDE.md` is collected and compressed directly into an identity block
+- `POST /v1/messages` requests are rewritten before upstream so older history becomes a `[CONTEXT_SUMMARY]` block
+- large tool outputs go through Engram's redundancy check so Claude can avoid re-sending repeated output
+
+For end users, the flow is: install, restart Claude Code, and start working.
 
 **Manual install** (if you prefer explicit steps):
 
@@ -116,6 +123,8 @@ The **Codebook Wizard** (`/engram:engram-codebook`) is the fastest way to wire u
 ```bash
 engram install --openclaw
 ```
+
+OpenClaw support is currently plugin installation only. The zero-touch daemon, readiness verification, and automatic proxy wiring shipped for Claude Code first.
 
 ### SDKs
 
@@ -157,7 +166,7 @@ server:
 
 proxy:
   port: 4242          # HTTP proxy port (Claude Code routes through this)
-  window_size: 10     # context window compression depth
+  window_size: 10     # default: keep the last 10 messages verbatim, summarize older history
 ```
 
 Run `engram serve --help` for the full list of options.
@@ -272,7 +281,7 @@ engram analyze
 
 ### Updating LLM Calls to Use Engram
 
-For transparent proxy use (Claude Code, OpenClaw), no code changes are needed — all calls route through Engram automatically after `engram install`.
+For transparent proxy use in Claude Code, no code changes are needed after `engram install --claude-code` — requests route through Engram automatically.
 
 For SDK use, replace the direct Anthropic/OpenAI base URL with the local proxy:
 
@@ -294,13 +303,13 @@ response = client.messages.create(
 import anthropic
 import httpx
 
-# Route through Engram's local proxy — compression is transparent
+# Route through Engram's local proxy — older history is summarized before upstream
 client = anthropic.Anthropic(
     api_key="...",
     http_client=httpx.Client(proxies="http://localhost:4242")
 )
 
-# Same call — Engram compresses identity and context before forwarding
+# Same call — Engram compresses identity and older context before forwarding
 response = client.messages.create(
     model="claude-sonnet-4-6",
     system="You are a concise senior Go engineer...",  # compressed automatically
