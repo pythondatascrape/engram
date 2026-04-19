@@ -3,14 +3,13 @@ package proxy
 
 import (
 	"bytes"
+	"compress/gzip"
 	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
 	"strings"
 	"sync"
-
-	"github.com/pythondatascrape/engram/internal/identity/codebook"
 )
 
 // engramSessionHeader is the request header used to pass the session ID from
@@ -258,21 +257,20 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Get exact uncompressed token count from the count_tokens API.
-	// This runs before compression so it measures the original payload.
-	ctxOrig := h.countTokens(rawBody, r.Header)
-	if ctxOrig < 0 {
-		// Fallback to estimation if count_tokens is unavailable.
-		systemTokens := len(req.System) / 4
-		ctxOrig = EstimateTokens(req.Messages) + systemTokens
-		slog.Debug("proxy: countTokens unavailable, using estimate",
-			"session", sessionID, "estimate", ctxOrig)
-	} else {
-		slog.Debug("proxy: exact token count (uncompressed)",
-			"session", sessionID, "input_tokens", ctxOrig)
+	// Estimate the original input size locally instead of making an extra
+	// upstream count_tokens request. That preflight doubled Anthropic traffic
+	// for proxied Claude requests and could trigger avoidable rate limiting.
+	systemTokens := len(req.System) / 4
+	ctxOrig := EstimateTokens(req.Messages) + systemTokens
+	if rawEstimate := len(rawBody) / 4; rawEstimate > ctxOrig {
+		ctxOrig = rawEstimate
 	}
+	slog.Debug("proxy: estimated token count (uncompressed)",
+		"session", sessionID, "estimate", ctxOrig)
 
 	windowBefore := EstimateTokens(req.Messages)
+	contextOrig := windowBefore
+	identityOrig := len(req.System) / 4
 	req.Messages = Compress(req.Messages, h.windowSize)
 	windowSaved := windowBefore - EstimateTokens(req.Messages)
 
@@ -299,16 +297,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	raw["messages"] = compressedMsgs
 	forwardedSystem := req.System
+	// Anthropic appears sensitive to system-prompt rewrites, so keep the
+	// system prompt verbatim on this path and only compress conversation context.
 	systemSaved := 0
-	if req.System != "" {
-		if compressed, ok := codebook.CompressIfSafe(req.System); ok {
-			systemSaved = len(req.System)/4 - len(compressed)/4
-			b, _ := json.Marshal(compressed)
-			raw["system"] = b
-			forwardedSystem = compressed
-		}
-	}
-	if windowSaved > 0 || budgetSaved > 0 || systemSaved > 0 {
+	if windowSaved > 0 || budgetSaved > 0 {
 		slog.Info("proxy: compression savings",
 			"session", sessionID,
 			"window_saved_tokens", windowSaved,
@@ -337,10 +329,28 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		slog.Debug("proxy: exact token count (compressed)",
 			"session", sessionID, "input_tokens", ctxComp)
 	}
+	contextComp := EstimateTokens(req.Messages)
+	identityComp := len(forwardedSystem) / 4
 
 	// Write stats asynchronously after response.
 	go func() {
-		_ = WriteStats(h.sessionsDir, sessionID, ctxOrig, ctxComp)
+		_ = WriteStatsDetailed(h.sessionsDir, sessionID, turnStats{
+			Total: tokenTotals{
+				Orig:  ctxOrig,
+				Comp:  ctxComp,
+				Saved: clampSaved(ctxOrig, ctxComp),
+			},
+			Identity: tokenTotals{
+				Orig:  identityOrig,
+				Comp:  identityComp,
+				Saved: clampSaved(identityOrig, identityComp),
+			},
+			Context: tokenTotals{
+				Orig:  contextOrig,
+				Comp:  contextComp,
+				Saved: clampSaved(contextOrig, contextComp),
+			},
+		})
 		if h.afterStats != nil {
 			h.afterStats()
 		}
@@ -360,14 +370,11 @@ func (h *Handler) forwardVerbatim(w http.ResponseWriter, r *http.Request, body [
 	h.forwardWithBody(w, r, body, upstream)
 }
 
-// forwardWithBody sends the request upstream with the provided body and streams
-// the response back. Returns the captured response body for usage extraction.
-func (h *Handler) forwardWithBody(w http.ResponseWriter, r *http.Request, body []byte, upstream string) []byte {
+func (h *Handler) doUpstreamRequest(r *http.Request, body []byte, upstream string) (*http.Response, error) {
 	upstreamURL := upstream + r.URL.RequestURI()
 	upstreamReq, err := http.NewRequestWithContext(r.Context(), r.Method, upstreamURL, bytes.NewReader(body))
 	if err != nil {
-		http.Error(w, "failed to create upstream request", http.StatusBadGateway)
-		return nil
+		return nil, err
 	}
 
 	// Clone headers, then drop internal/computed ones before forwarding.
@@ -377,14 +384,27 @@ func (h *Handler) forwardWithBody(w http.ResponseWriter, r *http.Request, body [
 	upstreamReq.Header.Del("Content-Length")
 	upstreamReq.Header.Del(engramSessionHeader)
 	upstreamReq.ContentLength = int64(len(body))
+	return h.client.Do(upstreamReq)
+}
 
-	resp, err := h.client.Do(upstreamReq)
+// forwardWithBody sends the request upstream with the provided body and streams
+// the response back. Returns the captured response body for usage extraction.
+func (h *Handler) forwardWithBody(w http.ResponseWriter, r *http.Request, body []byte, upstream string) []byte {
+	resp, err := h.doUpstreamRequest(r, body, upstream)
 	if err != nil {
-		http.Error(w, "upstream request failed: "+err.Error(), http.StatusBadGateway)
+		slog.Error("proxy: upstream request failed",
+			"upstream", upstream,
+			"path", r.URL.Path,
+			"method", r.Method,
+			"err", err)
+		http.Error(w, "failed to create upstream request", http.StatusBadGateway)
 		return nil
 	}
-	defer resp.Body.Close()
+	return h.writeUpstreamResponse(w, resp)
+}
 
+func (h *Handler) writeUpstreamResponse(w http.ResponseWriter, resp *http.Response) []byte {
+	defer resp.Body.Close()
 	// Copy response headers.
 	for k, vs := range resp.Header {
 		for _, v := range vs {
@@ -411,7 +431,31 @@ func (h *Handler) forwardWithBody(w http.ResponseWriter, r *http.Request, body [
 			break
 		}
 	}
+	if resp.StatusCode >= http.StatusBadRequest {
+		slog.Warn("proxy: upstream returned non-2xx",
+			"upstream", resp.Request.URL.Scheme+"://"+resp.Request.URL.Host,
+			"path", resp.Request.URL.Path,
+			"method", resp.Request.Method,
+			"status", resp.StatusCode,
+			"body_preview", truncateLogBody(captured.Bytes(), 512))
+	}
 	return captured.Bytes()
+}
+
+func truncateLogBody(body []byte, max int) string {
+	if len(body) >= 2 && body[0] == 0x1f && body[1] == 0x8b {
+		if zr, err := gzip.NewReader(bytes.NewReader(body)); err == nil {
+			if decoded, err := io.ReadAll(zr); err == nil {
+				body = decoded
+			}
+			_ = zr.Close()
+		}
+	}
+	text := strings.TrimSpace(string(body))
+	if max <= 0 || len(text) <= max {
+		return text
+	}
+	return text[:max] + "...(truncated)"
 }
 
 // ServeOpenAI handles all requests arriving on the OpenAI-compatible listener.
@@ -470,6 +514,11 @@ func (h *Handler) handleOpenAI(w http.ResponseWriter, r *http.Request, rawBody [
 	if ctxOrig == 0 {
 		ctxOrig = estimateOpenAITokens(rawBody)
 	}
+	identityOrig := openAIIdentityTokens(req.Messages)
+	contextOrig := ctxOrig - identityOrig
+	if contextOrig < 0 {
+		contextOrig = 0
+	}
 
 	identitySaved := 0
 	req.Messages, identitySaved = compressOpenAIIdentityMessages(req.Messages)
@@ -520,7 +569,28 @@ func (h *Handler) handleOpenAI(w http.ResponseWriter, r *http.Request, rawBody [
 		if ctxComp < 0 {
 			ctxComp = EstimateTokens(req.Messages)
 		}
-		_ = WriteStats(h.sessionsDir, sessionID, ctxOrig, ctxComp)
+		identityComp := openAIIdentityTokens(req.Messages)
+		contextComp := ctxComp - identityComp
+		if contextComp < 0 {
+			contextComp = 0
+		}
+		_ = WriteStatsDetailed(h.sessionsDir, sessionID, turnStats{
+			Total: tokenTotals{
+				Orig:  ctxOrig,
+				Comp:  ctxComp,
+				Saved: clampSaved(ctxOrig, ctxComp),
+			},
+			Identity: tokenTotals{
+				Orig:  identityOrig,
+				Comp:  identityComp,
+				Saved: clampSaved(identityOrig, identityComp),
+			},
+			Context: tokenTotals{
+				Orig:  contextOrig,
+				Comp:  contextComp,
+				Saved: clampSaved(contextOrig, contextComp),
+			},
+		})
 		if h.afterStats != nil {
 			h.afterStats()
 		}
@@ -551,6 +621,11 @@ func (h *Handler) handleOpenAIResponses(w http.ResponseWriter, r *http.Request, 
 	ctxOrig := EstimateTokens(inputMessages) + estimateInstructionsTokens(req.Instructions)
 	if ctxOrig == 0 {
 		ctxOrig = estimateOpenAITokens(rawBody)
+	}
+	identityOrig := estimateInstructionsTokens(req.Instructions) + openAIIdentityTokens(inputMessages)
+	contextOrig := ctxOrig - identityOrig
+	if contextOrig < 0 {
+		contextOrig = 0
 	}
 
 	windowBefore := EstimateTokens(inputMessages)
@@ -596,9 +671,30 @@ func (h *Handler) handleOpenAIResponses(w http.ResponseWriter, r *http.Request, 
 	go func() {
 		ctxComp := parseOpenAIResponsesUsage(respBody)
 		if ctxComp < 0 {
-			ctxComp = EstimateTokens(compressedMessages) + estimateInstructionsTokens(req.Instructions)
+			ctxComp = EstimateTokens(compressedMessages) + estimateInstructionsTokens(compressedInstructions)
 		}
-		_ = WriteStats(h.sessionsDir, sessionID, ctxOrig, ctxComp)
+		identityComp := estimateInstructionsTokens(compressedInstructions) + openAIIdentityTokens(compressedMessages)
+		contextComp := ctxComp - identityComp
+		if contextComp < 0 {
+			contextComp = 0
+		}
+		_ = WriteStatsDetailed(h.sessionsDir, sessionID, turnStats{
+			Total: tokenTotals{
+				Orig:  ctxOrig,
+				Comp:  ctxComp,
+				Saved: clampSaved(ctxOrig, ctxComp),
+			},
+			Identity: tokenTotals{
+				Orig:  identityOrig,
+				Comp:  identityComp,
+				Saved: clampSaved(identityOrig, identityComp),
+			},
+			Context: tokenTotals{
+				Orig:  contextOrig,
+				Comp:  contextComp,
+				Saved: clampSaved(contextOrig, contextComp),
+			},
+		})
 		if h.afterStats != nil {
 			h.afterStats()
 		}

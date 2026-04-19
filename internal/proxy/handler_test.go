@@ -153,6 +153,46 @@ func TestMessagesCompressed(t *testing.T) {
 	}
 }
 
+func TestMessagesDoNotPreflightCountTokens(t *testing.T) {
+	t.Helper()
+	countCalls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/messages/count_tokens" {
+			countCalls++
+			http.Error(w, "unexpected count_tokens preflight", http.StatusTooManyRequests)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id":   "test",
+			"type": "message",
+			"content": []map[string]any{
+				{"type": "text", "text": "ok"},
+			},
+			"usage": map[string]any{
+				"input_tokens":  42,
+				"output_tokens": 5,
+			},
+		})
+	}))
+	defer srv.Close()
+
+	done := make(chan struct{}, 1)
+	h := NewHandler(5, t.TempDir(), srv.URL, "")
+	h.afterStats = func() { done <- struct{}{} }
+
+	resp := postMessages(t, h, makeMessages(15), "sys", nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+	<-done
+
+	if countCalls != 0 {
+		t.Fatalf("expected no count_tokens preflight calls, got %d", countCalls)
+	}
+}
+
 // TestCompressedBodyPreservesAllFields verifies that compression only patches
 // the "messages" field and preserves all other original request fields like
 // max_tokens, tools, temperature, etc.
@@ -571,7 +611,7 @@ func TestSystemCompressionFailsOpenForThinProse(t *testing.T) {
 	}
 }
 
-func TestSystemCompressionAllowsStructuredIdentity(t *testing.T) {
+func TestAnthropicSystemPromptIsForwardedVerbatim(t *testing.T) {
 	srv, received := fakeAnthropic(t)
 	defer srv.Close()
 
@@ -579,7 +619,7 @@ func TestSystemCompressionAllowsStructuredIdentity(t *testing.T) {
 	h := NewHandler(10, t.TempDir(), srv.URL, "")
 	h.afterStats = func() { done <- struct{}{} }
 
-	system := "role: engineer\nresponse_style: concise\nplatform: macos"
+	system := "Core behavior instructions stay verbatim.\nrole: engineer\nresponse_style: concise\nplatform: macos\nDo not remove this safety line."
 	resp := postMessages(t, h, makeMessages(3), system, nil)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
@@ -592,10 +632,7 @@ func TestSystemCompressionAllowsStructuredIdentity(t *testing.T) {
 	if err := json.Unmarshal(*received, &parsed); err != nil {
 		t.Fatalf("parse received body: %v", err)
 	}
-	if parsed.System == system {
-		t.Fatalf("expected structured identity system to be normalized to key=value form; got unchanged %q", parsed.System)
-	}
-	if !strings.Contains(parsed.System, "role=engineer") {
-		t.Fatalf("expected compressed system to contain derived key=value pairs, got %q", parsed.System)
+	if parsed.System != system {
+		t.Fatalf("expected Anthropic system prompt to be forwarded unchanged; got %q", parsed.System)
 	}
 }

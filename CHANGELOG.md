@@ -2,6 +2,16 @@
 
 All notable changes to Engram will be documented in this file.
 
+## [0.3.3] - 2026-04-19
+
+### Changed
+- Anthropic proxy requests now keep the `system` prompt verbatim instead of attempting identity compression, while still applying conversation window compression.
+
+### Fixed
+- Removed the Anthropic `count_tokens` preflight from the proxy path, avoiding extra upstream traffic before each Claude request.
+- Anthropic proxy failures are now easier to diagnose with clearer upstream error logging.
+- Claude-through-Engram reliability is restored for Anthropic by disabling the system/identity rewrite that triggered upstream throttling.
+
 ## [0.3.0] - 2026-04-05
 
 ### Added
