@@ -8,34 +8,38 @@ import (
 )
 
 type entry struct {
-	limiter  *rate.Limiter
+	lim      *rate.Limiter
 	lastSeen time.Time
 }
 
 // RateLimiter is a per-client token-bucket rate limiter with optional TTL-based eviction.
 type RateLimiter struct {
-	mu      sync.Mutex
-	entries map[string]*entry
-	rpm     int
-	burst   int
-	ttl     time.Duration
+	mu         sync.Mutex
+	limiters   map[string]*entry
+	ipLimiters map[string]*entry
+	rpm        int
+	burst      int
+	ttl        time.Duration
 }
 
 // NewRateLimiter creates a RateLimiter with the given requests-per-minute and burst size.
-// Entries are never evicted unless Evict is called explicitly or a background ticker calls it.
 func NewRateLimiter(rpm, burst int) *RateLimiter {
-	return NewRateLimiterWithTTL(rpm, burst, 0)
+	return NewRateLimiterWithTTL(rpm, burst, 10*time.Minute)
 }
 
-// NewRateLimiterWithTTL creates a RateLimiter that considers entries older than ttl as
-// evictable. Set ttl = 0 to disable eviction.
+// NewRateLimiterWithTTL creates a RateLimiter whose idle entries are evicted after ttl.
 func NewRateLimiterWithTTL(rpm, burst int, ttl time.Duration) *RateLimiter {
 	return &RateLimiter{
-		entries: make(map[string]*entry),
-		rpm:     rpm,
-		burst:   burst,
-		ttl:     ttl,
+		limiters:   make(map[string]*entry),
+		ipLimiters: make(map[string]*entry),
+		rpm:        rpm,
+		burst:      burst,
+		ttl:        ttl,
 	}
+}
+
+func (rl *RateLimiter) newLimiter() *rate.Limiter {
+	return rate.NewLimiter(rate.Every(time.Minute/time.Duration(rl.rpm)), rl.burst)
 }
 
 // Allow reports whether the given clientID is permitted to proceed.
@@ -45,37 +49,66 @@ func (rl *RateLimiter) Allow(clientID string) bool {
 		return true
 	}
 	rl.mu.Lock()
-	e, ok := rl.entries[clientID]
+	e, ok := rl.limiters[clientID]
 	if !ok {
-		e = &entry{
-			limiter: rate.NewLimiter(rate.Every(time.Minute/time.Duration(rl.rpm)), rl.burst),
-		}
-		rl.entries[clientID] = e
+		e = &entry{lim: rl.newLimiter()}
+		rl.limiters[clientID] = e
 	}
 	e.lastSeen = time.Now()
 	rl.mu.Unlock()
-	return e.limiter.Allow()
+	return e.lim.Allow()
 }
 
-// Evict removes entries that have not been seen for longer than the configured TTL.
-// No-op when TTL is zero.
-func (rl *RateLimiter) Evict() {
-	if rl.ttl <= 0 {
-		return
+// AllowIP reports whether the given IP address is permitted to proceed.
+// Returns true unconditionally when rpm <= 0 (disabled).
+func (rl *RateLimiter) AllowIP(ip string) bool {
+	if rl.rpm <= 0 {
+		return true
 	}
-	cutoff := time.Now().Add(-rl.ttl)
+	rl.mu.Lock()
+	e, ok := rl.ipLimiters[ip]
+	if !ok {
+		e = &entry{lim: rl.newLimiter()}
+		rl.ipLimiters[ip] = e
+	}
+	e.lastSeen = time.Now()
+	rl.mu.Unlock()
+	return e.lim.Allow()
+}
+
+// EvictStale removes entries that have been idle longer than the configured TTL.
+func (rl *RateLimiter) EvictStale() {
+	threshold := time.Now().Add(-rl.ttl)
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
-	for id, e := range rl.entries {
-		if e.lastSeen.Before(cutoff) {
-			delete(rl.entries, id)
+	for k, e := range rl.limiters {
+		if e.lastSeen.Before(threshold) {
+			delete(rl.limiters, k)
+		}
+	}
+	for k, e := range rl.ipLimiters {
+		if e.lastSeen.Before(threshold) {
+			delete(rl.ipLimiters, k)
 		}
 	}
 }
 
-// Len returns the current number of tracked client entries.
-func (rl *RateLimiter) Len() int {
+// Evict is an alias for EvictStale.
+func (rl *RateLimiter) Evict() { rl.EvictStale() }
+
+// LimiterCount returns the number of tracked client entries (for testing).
+func (rl *RateLimiter) LimiterCount() int {
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
-	return len(rl.entries)
+	return len(rl.limiters)
+}
+
+// Len is an alias for LimiterCount.
+func (rl *RateLimiter) Len() int { return rl.LimiterCount() }
+
+// IPLimiterCount returns the number of tracked IP entries (for testing).
+func (rl *RateLimiter) IPLimiterCount() int {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+	return len(rl.ipLimiters)
 }

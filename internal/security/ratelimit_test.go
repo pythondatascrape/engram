@@ -40,12 +40,11 @@ func TestRateLimiter_EvictsIdleEntries(t *testing.T) {
 	ttl := 50 * time.Millisecond
 	rl := security.NewRateLimiterWithTTL(10, 1, ttl)
 	require.True(t, rl.Allow("client-1"))
-	require.False(t, rl.Allow("client-1")) // burst exhausted
+	require.False(t, rl.Allow("client-1"))
 
 	time.Sleep(ttl * 3)
-	rl.Evict() // explicit sweep
+	rl.Evict()
 
-	// After eviction the entry is gone; a fresh limiter is created with full burst.
 	require.True(t, rl.Allow("client-1"))
 }
 
@@ -68,13 +67,46 @@ func TestRateLimiter_ActiveEntryNotEvicted(t *testing.T) {
 	rl.Allow("active")
 	rl.Allow("idle")
 
-	// Refresh "active" at ttl/2 so it stays well within TTL.
 	time.Sleep(ttl / 2)
 	rl.Allow("active")
 
-	// Sleep only ttl/2 more: "idle" is now ttl*1.5 old (expired), "active" is ttl/2 old (fresh).
 	time.Sleep(ttl / 2)
 	rl.Evict()
 
-	require.Equal(t, 1, rl.Len()) // only "active" remains
+	require.Equal(t, 1, rl.Len())
+}
+
+func TestRateLimiter_AllowIP_BlocksOverBurst(t *testing.T) {
+	rl := security.NewRateLimiter(10, 1)
+	require.True(t, rl.AllowIP("192.0.2.1"))
+	require.False(t, rl.AllowIP("192.0.2.1"))
+}
+
+func TestRateLimiter_AllowIP_IsolatesAddresses(t *testing.T) {
+	rl := security.NewRateLimiter(10, 1)
+	require.True(t, rl.AllowIP("192.0.2.1"))
+	require.False(t, rl.AllowIP("192.0.2.1"))
+	require.True(t, rl.AllowIP("192.0.2.2"))
+}
+
+func TestRateLimiter_AllowIP_Disabled(t *testing.T) {
+	rl := security.NewRateLimiter(0, 0)
+	for i := 0; i < 50; i++ {
+		require.True(t, rl.AllowIP("192.0.2.1"))
+	}
+}
+
+func TestRateLimiter_IPAndClientIndependent(t *testing.T) {
+	rl := security.NewRateLimiter(10, 1)
+	require.True(t, rl.AllowIP("192.0.2.1"))
+	require.False(t, rl.AllowIP("192.0.2.1"))
+	require.True(t, rl.Allow("192.0.2.1"))
+}
+
+func TestRateLimiter_EvictsStaleIPEntries(t *testing.T) {
+	rl := security.NewRateLimiterWithTTL(10, 1, 50*time.Millisecond)
+	rl.AllowIP("192.0.2.1")
+	time.Sleep(100 * time.Millisecond)
+	rl.EvictStale()
+	require.Equal(t, 0, rl.IPLimiterCount())
 }
