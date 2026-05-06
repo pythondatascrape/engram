@@ -3,6 +3,7 @@ package proxy
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -36,7 +37,11 @@ func TestSessionID_EmptyPromptStable(t *testing.T) {
 
 func TestWriteStats_CreatesCtxFile(t *testing.T) {
 	dir := t.TempDir()
-	err := WriteStats(dir, "test-session", 1000, 300)
+	err := WriteStatsDetailed(dir, "test-session", turnStats{
+		Total:    tokenTotals{Orig: 1000, Comp: 300, Saved: 700},
+		Identity: tokenTotals{Orig: 200, Comp: 50, Saved: 150},
+		Context:  tokenTotals{Orig: 800, Comp: 250, Saved: 550},
+	})
 	if err != nil {
 		t.Fatalf("WriteStats failed: %v", err)
 	}
@@ -55,6 +60,28 @@ func TestWriteStats_CreatesCtxFile(t *testing.T) {
 	}
 	if got["ctx_comp"] != float64(300) {
 		t.Errorf("expected ctx_comp=300, got %v", got["ctx_comp"])
+	}
+	identity, ok := got["identity_tokens"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected identity_tokens object, got %T", got["identity_tokens"])
+	}
+	perTurn, ok := identity["per_turn"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected identity_tokens.per_turn object, got %T", identity["per_turn"])
+	}
+	if perTurn["orig"] != float64(200) {
+		t.Errorf("expected identity per_turn orig=200, got %v", perTurn["orig"])
+	}
+	context, ok := got["context_tokens"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected context_tokens object, got %T", got["context_tokens"])
+	}
+	total, ok := context["total"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected context_tokens.total object, got %T", context["total"])
+	}
+	if total["comp"] != float64(250) {
+		t.Errorf("expected context total comp=250, got %v", total["comp"])
 	}
 }
 
@@ -88,9 +115,79 @@ func TestWriteStats_OnlyWritesCtxFields(t *testing.T) {
 	data, _ := os.ReadFile(filepath.Join(dir, "only-ctx.ctx.json"))
 	var got map[string]any
 	json.Unmarshal(data, &got)
-	// Exactly three keys: ctx_orig, ctx_comp, turns.
-	if len(got) != 3 {
-		t.Errorf("ctx file should contain exactly ctx_orig, ctx_comp, and turns, got keys: %v", got)
+	for _, key := range []string{"ctx_orig", "ctx_comp", "turns", "per_turn", "total", "identity_tokens", "context_tokens"} {
+		if _, ok := got[key]; !ok {
+			t.Errorf("ctx file missing key %q; got keys: %v", key, got)
+		}
+	}
+}
+
+func TestWriteStatsDetailed_AccumulatesPerCategoryTotals(t *testing.T) {
+	dir := t.TempDir()
+	if err := WriteStatsDetailed(dir, "detailed", turnStats{
+		Total:    tokenTotals{Orig: 100, Comp: 60},
+		Identity: tokenTotals{Orig: 20, Comp: 8},
+		Context:  tokenTotals{Orig: 80, Comp: 52},
+	}); err != nil {
+		t.Fatalf("first WriteStatsDetailed failed: %v", err)
+	}
+	if err := WriteStatsDetailed(dir, "detailed", turnStats{
+		Total:    tokenTotals{Orig: 120, Comp: 70},
+		Identity: tokenTotals{Orig: 20, Comp: 8},
+		Context:  tokenTotals{Orig: 100, Comp: 62},
+	}); err != nil {
+		t.Fatalf("second WriteStatsDetailed failed: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(dir, "detailed.ctx.json"))
+	if err != nil {
+		t.Fatalf("read ctx file: %v", err)
+	}
+	var got ctxStats
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("unmarshal ctx file: %v", err)
+	}
+	if got.Turns != 2 {
+		t.Fatalf("turns = %d, want 2", got.Turns)
+	}
+	if got.Identity.Total.Orig != 40 || got.Identity.Total.Comp != 16 {
+		t.Fatalf("identity totals = %+v, want orig=40 comp=16", got.Identity.Total)
+	}
+	if got.Context.Total.Orig != 180 || got.Context.Total.Comp != 114 {
+		t.Fatalf("context totals = %+v, want orig=180 comp=114", got.Context.Total)
+	}
+	if got.PerTurn.Orig != 120 || got.PerTurn.Comp != 70 {
+		t.Fatalf("per_turn total = %+v, want orig=120 comp=70", got.PerTurn)
+	}
+}
+
+// TestWriteStats_PerSessionLocking verifies that writes to different sessions
+// do not block each other — distinct sessions must hold independent locks.
+func TestWriteStats_PerSessionLocking(t *testing.T) {
+	dir := t.TempDir()
+	const sessions = 20
+	done := make(chan error, sessions)
+	for i := 0; i < sessions; i++ {
+		go func(n int) {
+			done <- WriteStats(dir, fmt.Sprintf("session-%d", n), n*100, n*30)
+		}(i)
+	}
+	for i := 0; i < sessions; i++ {
+		if err := <-done; err != nil {
+			t.Errorf("parallel WriteStats failed: %v", err)
+		}
+	}
+	// Every session file must exist and be valid JSON.
+	for i := 0; i < sessions; i++ {
+		data, err := os.ReadFile(filepath.Join(dir, fmt.Sprintf("session-%d.ctx.json", i)))
+		if err != nil {
+			t.Errorf("session-%d ctx file missing: %v", i, err)
+			continue
+		}
+		var got map[string]any
+		if err := json.Unmarshal(data, &got); err != nil {
+			t.Errorf("session-%d ctx file corrupted: %v", i, err)
+		}
 	}
 }
 
