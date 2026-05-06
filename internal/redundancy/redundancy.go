@@ -16,15 +16,21 @@ type Result struct {
 // Checker detects redundant content at three levels: exact, normalized, and similar.
 // It is safe for concurrent use.
 type Checker struct {
-	mu         sync.Mutex
-	threshold  float64
-	raw        []string
-	normalized []string
+	mu            sync.Mutex
+	threshold     float64
+	raw           []string
+	normalized    []string
+	exactIdx      map[string]bool // O(1) exact lookup
+	normalizedIdx map[string]bool // O(1) normalized lookup
 }
 
 // NewChecker creates a Checker with the given Jaccard similarity threshold.
 func NewChecker(threshold float64) *Checker {
-	return &Checker{threshold: threshold}
+	return &Checker{
+		threshold:     threshold,
+		exactIdx:      make(map[string]bool),
+		normalizedIdx: make(map[string]bool),
+	}
 }
 
 // normalize sorts whitespace-separated tokens so order-independent comparison works.
@@ -38,12 +44,35 @@ func normalize(s string) string {
 func (c *Checker) Record(content string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	norm := normalize(content)
 	c.raw = append(c.raw, content)
-	c.normalized = append(c.normalized, normalize(content))
+	c.normalized = append(c.normalized, norm)
+	c.exactIdx[content] = true
+	c.normalizedIdx[norm] = true
 }
 
 // Check tests content against all previously recorded strings.
 // It does NOT record the content — call Record separately if desired.
+func (c *Checker) ExactIndex() map[string]bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	out := make(map[string]bool, len(c.exactIdx))
+	for k, v := range c.exactIdx {
+		out[k] = v
+	}
+	return out
+}
+
+func (c *Checker) NormalizedIndex() map[string]bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	out := make(map[string]bool, len(c.normalizedIdx))
+	for k, v := range c.normalizedIdx {
+		out[k] = v
+	}
+	return out
+}
+
 func (c *Checker) Check(content string) Result {
 	return c.CheckWithThreshold(content, c.threshold)
 }
@@ -55,16 +84,17 @@ func (c *Checker) CheckWithThreshold(content string, threshold float64) Result {
 	defer c.mu.Unlock()
 
 	norm := normalize(content)
-	normTokens := strings.Fields(norm)
 
-	for i, r := range c.raw {
-		if r == content {
-			return Result{IsRedundant: true, Kind: "exact", Similarity: 1.0}
-		}
-		if c.normalized[i] == norm {
-			return Result{IsRedundant: true, Kind: "normalized", Similarity: 1.0}
-		}
-		sim := jaccard(normTokens, strings.Fields(c.normalized[i]))
+	if c.exactIdx[content] {
+		return Result{IsRedundant: true, Kind: "exact", Similarity: 1.0}
+	}
+	if c.normalizedIdx[norm] {
+		return Result{IsRedundant: true, Kind: "normalized", Similarity: 1.0}
+	}
+
+	normTokens := strings.Fields(norm)
+	for _, n := range c.normalized {
+		sim := jaccard(normTokens, strings.Fields(n))
 		if sim >= threshold {
 			return Result{IsRedundant: true, Kind: "similar", Similarity: sim}
 		}
