@@ -2,6 +2,7 @@ package security_test
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -33,4 +34,47 @@ func TestRateLimiter_Disabled(t *testing.T) {
 	for i := 0; i < 100; i++ {
 		require.True(t, rl.Allow("client-1"))
 	}
+}
+
+func TestRateLimiter_EvictsIdleEntries(t *testing.T) {
+	ttl := 50 * time.Millisecond
+	rl := security.NewRateLimiterWithTTL(10, 1, ttl)
+	require.True(t, rl.Allow("client-1"))
+	require.False(t, rl.Allow("client-1")) // burst exhausted
+
+	time.Sleep(ttl * 3)
+	rl.Evict() // explicit sweep
+
+	// After eviction the entry is gone; a fresh limiter is created with full burst.
+	require.True(t, rl.Allow("client-1"))
+}
+
+func TestRateLimiter_LenAfterEviction(t *testing.T) {
+	ttl := 50 * time.Millisecond
+	rl := security.NewRateLimiterWithTTL(10, 1, ttl)
+	rl.Allow("a")
+	rl.Allow("b")
+	rl.Allow("c")
+	require.Equal(t, 3, rl.Len())
+
+	time.Sleep(ttl * 3)
+	rl.Evict()
+	require.Equal(t, 0, rl.Len())
+}
+
+func TestRateLimiter_ActiveEntryNotEvicted(t *testing.T) {
+	ttl := 100 * time.Millisecond
+	rl := security.NewRateLimiterWithTTL(60, 5, ttl)
+	rl.Allow("active")
+	rl.Allow("idle")
+
+	// Refresh "active" at ttl/2 so it stays well within TTL.
+	time.Sleep(ttl / 2)
+	rl.Allow("active")
+
+	// Sleep only ttl/2 more: "idle" is now ttl*1.5 old (expired), "active" is ttl/2 old (fresh).
+	time.Sleep(ttl / 2)
+	rl.Evict()
+
+	require.Equal(t, 1, rl.Len()) // only "active" remains
 }
