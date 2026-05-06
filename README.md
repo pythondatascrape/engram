@@ -1,6 +1,6 @@
 # Engram
 
-**Local-first context compression for AI coding tools.** One binary saves 85-93% of redundant tokens across every LLM call.
+**Local-first context compression for AI coding tools.** Reduces redundant tokens by compressing conversation history across every LLM call.
 
 ---
 
@@ -8,15 +8,16 @@
 
 Every time an AI coding tool sends a request to an LLM, it re-sends the same context: who you are, what you're working on, your preferences, your project structure. This redundancy costs real money and eats into context windows.
 
-Engram eliminates it. It runs locally as a lightweight daemon and compresses both your **identity** (CLAUDE.md, system prompts, project instructions) and your **conversation context** (message history, tool results, responses) across every LLM call. The result: dramatically smaller prompts, lower costs, and more room in the context window for what actually matters.
+Engram reduces it. It runs locally as a lightweight daemon and compresses your **conversation context** (message history, tool results, responses) across every LLM call. The result: smaller prompts, lower costs, and more room in the context window for what actually matters.
+
+> **Note:** Identity compression (CLAUDE.md / system prompt codebook compression) is currently disabled for Anthropic/Claude due to compatibility issues. System prompts pass through verbatim. Context compression and redundancy control are fully active.
 
 ### How It Works
 
-Engram applies three compression stages:
+Engram applies two active compression stages:
 
-1. **Identity compression** — Verbose `CLAUDE.md` prose and project instructions are derived into a compact codebook and compressed directly at session start.
-2. **Context compression** — Older conversation history is collapsed into a `[CONTEXT_SUMMARY]` block at the local HTTP proxy while the most recent turns remain verbatim.
-3. **Redundancy control** — Large tool outputs are checked for repeated content so Claude can respond with concise delta-only summaries instead of restating everything.
+1. **Context compression** — Older conversation history is collapsed into a `[CONTEXT_SUMMARY]` block at the local HTTP proxy while the most recent turns remain verbatim.
+2. **Redundancy control** — Large tool outputs are checked for repeated content so Claude can respond with concise delta-only summaries instead of restating everything.
 
 ```mermaid
 flowchart LR
@@ -34,9 +35,7 @@ flowchart LR
 
 | Metric | Value |
 |--------|-------|
-| Identity compression | ~96-98% token reduction |
 | Context compression | ~40-60% token reduction |
-| Overall savings | 85-93% per session |
 | Startup overhead | <50ms |
 | Memory footprint | ~30MB resident |
 
@@ -239,9 +238,13 @@ See the [Travelbound demo project](https://github.com/pythondatascrape/travelbou
 
 ## Best Use
 
-Engram's identity compression is only as good as the codebook it works from. A well-structured codebook can reduce identity context from thousands of tokens to a handful of key=value pairs. This section shows how to maximize that savings — and how to wire it into your LLM calls.
+> **Note:** Identity compression (codebook-based system prompt compression) is currently disabled for Anthropic/Claude. The codebook workflow described below applies to OpenAI and custom SDK integrations. For Claude Code users, context compression is active automatically; system prompts pass through verbatim.
 
-### Why This Matters
+Engram's context compression is automatic once installed. For SDK integrations, you can also wire in identity compression via the codebook workflow.
+
+### Why This Matters (SDK / OpenAI)
+
+> **Note:** The identity compression workflow below applies to **OpenAI and custom SDK integrations**. For Claude Code, system prompts pass through verbatim — Anthropic's API does not currently support the codebook protocol.
 
 Every LLM call re-sends your identity: who you are, what you prefer, how you work. Written as prose, that identity is verbose by design — natural language is redundant. Engram replaces prose with a derived codebook so the same information travels in a fraction of the tokens.
 
@@ -402,10 +405,10 @@ async with await Engram.connect() as client:
 | Redundancy detection | None | `check_redundancy` strips re-stated values |
 | Manual tuning | Edit CLAUDE.md | Edit `.engram-codebook.yaml` |
 | Auto-derived | — | `derive_codebook` extracts from CLAUDE.md |
-| Identity compression | — | **~96–98%** |
+| Identity compression | — | **~96–98%** (OpenAI/SDK only; disabled for Claude) |
 
 The key insight: plain-text identity is high-fidelity but pays a large per-turn token tax. A codebook pays a one-time definition cost and then transmits identity in a handful of tokens for every turn that follows. On a 50-turn session, a 400-token identity compressed to 15 tokens saves ~19,000 tokens — roughly equivalent to adding 15 pages of usable context back to your window.
 
 ## License
 
-Apache 2.0 — see [LICENSE](LICENSE).
+Engram Source Available License — see [LICENSE](LICENSE). Commercial use and Compression Technology require written consent from the author.

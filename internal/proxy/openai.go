@@ -98,6 +98,17 @@ func compressOpenAIIdentityMessages(messages []AnthropicMessage) ([]AnthropicMes
 	return out, saved
 }
 
+func openAIIdentityTokens(messages []AnthropicMessage) int {
+	total := 0
+	for _, msg := range messages {
+		if msg.Role != "system" && msg.Role != "developer" {
+			continue
+		}
+		total += len(messageText(msg)) / 4
+	}
+	return total
+}
+
 func decodeOpenAIInputMessages(raw json.RawMessage) ([]AnthropicMessage, bool) {
 	envelopes, ok := decodeOpenAIInputEnvelopes(raw)
 	if !ok {
