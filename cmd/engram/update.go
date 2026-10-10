@@ -13,7 +13,7 @@ import (
 func newUpdateCmd() *cobra.Command {
 	var sourceDir string
 
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "update",
 		Short: "Update engram plugin in all detected AI clients",
 		Long: `Re-installs the engram plugin for all detected AI clients.
@@ -25,15 +25,6 @@ Run this after upgrading the engram binary to push new plugin files.`,
 				return nil
 			}
 
-			pluginBase := sourceDir
-			if pluginBase == "" {
-				exe, err := os.Executable()
-				if err != nil {
-					return fmt.Errorf("cannot determine executable path: %w", err)
-				}
-				pluginBase = filepath.Dir(exe)
-			}
-
 			for _, target := range targets {
 				fmt.Fprintf(cmd.OutOrStdout(), "Updating engram plugin for %s...\n", target.Name)
 
@@ -43,6 +34,10 @@ Run this after upgrading the engram binary to push new plugin files.`,
 					continue
 				}
 
+				pluginBase, err := resolvePluginBase(sourceDir, pluginDir)
+				if err != nil {
+					return err
+				}
 				src := filepath.Join(pluginBase, pluginDir)
 
 				switch target.Name {
@@ -76,4 +71,7 @@ Run this after upgrading the engram binary to push new plugin files.`,
 			return nil
 		},
 	}
+
+	cmd.Flags().StringVar(&sourceDir, "source", "", "Override plugin source directory")
+	return cmd
 }

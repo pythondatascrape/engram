@@ -62,7 +62,7 @@ func resolveSettingsPath(settingsPath string) (string, error) {
 }
 
 // registerPlugin copies sourceDir into <home>/<pathElems...>/<version>/, removing any
-// previous installation first. os.RemoveAll is a no-op when the target does not exist.
+// previous installation once sourceDir is known to exist. os.RemoveAll is a no-op when the target does not exist.
 func registerPlugin(sourceDir, version string, pathElems ...string) error {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -72,6 +72,14 @@ func registerPlugin(sourceDir, version string, pathElems ...string) error {
 	parts := append([]string{home}, pathElems...)
 	parts = append(parts, version)
 	targetDir := filepath.Join(parts...)
+
+	// Validate the source before touching the existing install, so a bad path
+	// never leaves the client with no plugin at all.
+	if info, err := os.Stat(sourceDir); err != nil {
+		return fmt.Errorf("plugin source: %w", err)
+	} else if !info.IsDir() {
+		return fmt.Errorf("plugin source %s is not a directory", sourceDir)
+	}
 
 	if _, err := os.Stat(targetDir); err == nil {
 		slog.Info("removing previous installation", "path", targetDir)

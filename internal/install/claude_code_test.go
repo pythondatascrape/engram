@@ -211,3 +211,19 @@ func TestRegisterClaudeCode_LatestSymlinkUpdatesOnReinstall(t *testing.T) {
 	assert.Equal(t, "v1.1.0", target, "latest should point to newest version after reinstall")
 }
 
+
+func TestRegisterClaudeCode_MissingSourceKeepsExistingInstall(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	src := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(src, "server.mjs"), []byte("// v1"), 0o644))
+	require.NoError(t, RegisterClaudeCode(src, "0.2.1"))
+
+	err := RegisterClaudeCode(filepath.Join(t.TempDir(), "missing"), "0.2.1")
+	require.Error(t, err)
+
+	data, err := os.ReadFile(filepath.Join(home, ".claude", "plugins", "cache", "engram", "engram", "0.2.1", "server.mjs"))
+	require.NoError(t, err, "existing install must survive a bad source dir")
+	assert.Equal(t, "// v1", string(data))
+}
