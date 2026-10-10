@@ -1,11 +1,17 @@
 package daemon
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"os"
 	"path/filepath"
+	"time"
 )
+
+// ErrAlreadyRunning is returned by NewListener when another daemon is already
+// accepting connections on the socket.
+var ErrAlreadyRunning = errors.New("daemon: another engram daemon is already running")
 
 // Listener wraps a Unix domain socket listener with lifecycle management.
 type Listener struct {
@@ -14,13 +20,18 @@ type Listener struct {
 }
 
 // NewListener creates a Unix domain socket at socketPath, cleaning up any stale
-// socket file that may exist from a previous run.
+// socket file that may exist from a previous run. A socket that still accepts
+// connections belongs to a live daemon and is left alone.
 func NewListener(socketPath string) (*Listener, error) {
 	dir := filepath.Dir(socketPath)
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return nil, fmt.Errorf("daemon: create directory %q: %w", dir, err)
 	}
 	if _, err := os.Stat(socketPath); err == nil {
+		if conn, err := net.DialTimeout("unix", socketPath, time.Second); err == nil {
+			conn.Close()
+			return nil, fmt.Errorf("%w on %q", ErrAlreadyRunning, socketPath)
+		}
 		if err := os.Remove(socketPath); err != nil {
 			return nil, fmt.Errorf("daemon: remove stale socket %q: %w", socketPath, err)
 		}

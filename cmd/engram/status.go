@@ -24,7 +24,7 @@ func runStatus(cmd *cobra.Command, args []string) error {
 
 	client, err := daemon.NewClient(socketPath)
 	if err != nil {
-		fmt.Fprintf(cmd.ErrOrStderr(), "Engram daemon is not running.\nStart it with: engram serve\nSocket: %s\n", socketPath)
+		fmt.Fprint(cmd.ErrOrStderr(), statusUnreachableMessage(socketPath, err))
 		os.Exit(1)
 	}
 	defer client.Close()
@@ -44,4 +44,8 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	fmt.Fprintf(out, "Tokens Saved:    %d\n", health.TotalSaved)
 	fmt.Fprintln(out)
 	return nil
+}
+
+func statusUnreachableMessage(socketPath string, err error) string {
+	return fmt.Sprintf("Engram daemon is not running.\nStart it with: engram serve\nSocket: %s\nError: %v\n", socketPath, err)
 }
