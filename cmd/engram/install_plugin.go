@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"runtime"
 	"time"
 
@@ -82,15 +81,6 @@ the engram compression plugin. Use flags to target a specific client.`,
 				}
 			}
 
-			pluginBase := sourceDir
-			if pluginBase == "" {
-				exe, err := os.Executable()
-				if err != nil {
-					return fmt.Errorf("cannot determine executable path: %w", err)
-				}
-				pluginBase = filepath.Dir(exe)
-			}
-
 			for _, target := range targets {
 				fmt.Fprintf(cmd.OutOrStdout(), "Installing engram plugin for %s...\n", target.Name)
 
@@ -100,7 +90,10 @@ the engram compression plugin. Use flags to target a specific client.`,
 					continue
 				}
 
-				src := filepath.Join(pluginBase, pluginDir)
+				src, err := resolvePluginDir(sourceDir, pluginDir)
+				if err != nil {
+					return err
+				}
 
 				switch target.Name {
 				case "claude-code":

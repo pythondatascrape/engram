@@ -45,10 +45,13 @@ func resolveMCPServerPath() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("resolve executable path: %w", err)
 	}
-	p := filepath.Join(filepath.Dir(exe), "..", "..", "plugins", "claude-code", "server.mjs")
-	p = filepath.Clean(p)
-	if _, err := os.Stat(p); err != nil {
-		return "", fmt.Errorf("server.mjs not found at %s (set ENGRAM_PLUGIN_ROOT to override)", p)
+	return mcpServerPathFor(exe)
+}
+
+func mcpServerPathFor(exe string) (string, error) {
+	p, err := findNearBinary(exe, filepath.Join("plugins", "claude-code", "server.mjs"))
+	if err != nil {
+		return "", fmt.Errorf("%w (set ENGRAM_PLUGIN_ROOT to override)", err)
 	}
 	return p, nil
 }

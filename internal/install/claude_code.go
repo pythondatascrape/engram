@@ -61,8 +61,8 @@ func resolveSettingsPath(settingsPath string) (string, error) {
 	return filepath.Join(home, ".claude", "settings.json"), nil
 }
 
-// registerPlugin copies sourceDir into <home>/<pathElems...>/<version>/, removing any
-// previous installation first. os.RemoveAll is a no-op when the target does not exist.
+// registerPlugin copies sourceDir into <home>/<pathElems...>/<version>/, replacing any
+// previous installation.
 func registerPlugin(sourceDir, version string, pathElems ...string) error {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -73,16 +73,26 @@ func registerPlugin(sourceDir, version string, pathElems ...string) error {
 	parts = append(parts, version)
 	targetDir := filepath.Join(parts...)
 
+	// Copy into a staging dir and swap it in only once the copy succeeds, so a
+	// missing or unreadable source never leaves the client without a plugin.
+	stagingDir := targetDir + ".tmp"
+	if err := os.RemoveAll(stagingDir); err != nil {
+		return fmt.Errorf("remove stale staging dir: %w", err)
+	}
+	slog.Info("installing plugin", "source", sourceDir, "target", targetDir)
+	if err := copyDir(sourceDir, stagingDir); err != nil {
+		_ = os.RemoveAll(stagingDir)
+		return fmt.Errorf("copy plugin files: %w", err)
+	}
+
 	if _, err := os.Stat(targetDir); err == nil {
 		slog.Info("removing previous installation", "path", targetDir)
 	}
 	if err := os.RemoveAll(targetDir); err != nil {
 		return fmt.Errorf("remove old installation: %w", err)
 	}
-
-	slog.Info("installing plugin", "source", sourceDir, "target", targetDir)
-	if err := copyDir(sourceDir, targetDir); err != nil {
-		return fmt.Errorf("copy plugin files: %w", err)
+	if err := os.Rename(stagingDir, targetDir); err != nil {
+		return fmt.Errorf("move plugin into place: %w", err)
 	}
 
 	slog.Info("plugin installed", "path", targetDir)
