@@ -211,7 +211,6 @@ func TestRegisterClaudeCode_LatestSymlinkUpdatesOnReinstall(t *testing.T) {
 	assert.Equal(t, "v1.1.0", target, "latest should point to newest version after reinstall")
 }
 
-
 func TestRegisterClaudeCode_MissingSourceKeepsExistingInstall(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -226,4 +225,28 @@ func TestRegisterClaudeCode_MissingSourceKeepsExistingInstall(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join(home, ".claude", "plugins", "cache", "engram", "engram", "0.2.1", "server.mjs"))
 	require.NoError(t, err, "existing install must survive a bad source dir")
 	assert.Equal(t, "// v1", string(data))
+}
+
+func TestRegisterClaudeCode_FailedCopyKeepsExistingInstall(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	src := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(src, "server.mjs"), []byte("// v1"), 0o644))
+	require.NoError(t, RegisterClaudeCode(src, "0.2.1"))
+
+	bad := t.TempDir()
+	unreadable := filepath.Join(bad, "server.mjs")
+	require.NoError(t, os.WriteFile(unreadable, []byte("// v2"), 0o000))
+	t.Cleanup(func() { _ = os.Chmod(unreadable, 0o644) })
+
+	require.Error(t, RegisterClaudeCode(bad, "0.2.1"))
+
+	versionDir := filepath.Join(home, ".claude", "plugins", "cache", "engram", "engram")
+	data, err := os.ReadFile(filepath.Join(versionDir, "0.2.1", "server.mjs"))
+	require.NoError(t, err, "existing install must survive a copy that fails partway")
+	assert.Equal(t, "// v1", string(data))
+
+	_, err = os.Stat(filepath.Join(versionDir, "0.2.1.tmp"))
+	assert.True(t, os.IsNotExist(err), "staging dir should be cleaned up")
 }

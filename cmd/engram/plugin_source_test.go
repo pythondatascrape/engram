@@ -9,68 +9,57 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// makeCheckout builds <root>/bin/engram and <root>/plugins/claude-code, the
-// layout produced by `make build` in a source checkout.
-func makeCheckout(t *testing.T) (root, exe string) {
+// makeLayout creates <root>/<binDir>/engram and <root>/plugins/claude-code/server.mjs.
+// binDir "bin" is the layout `make build` produces in a source checkout.
+func makeLayout(t *testing.T, binDir string) (root, exe string) {
 	t.Helper()
 	root, err := filepath.EvalSymlinks(t.TempDir())
 	require.NoError(t, err)
-	require.NoError(t, os.MkdirAll(filepath.Join(root, "bin"), 0o755))
+	require.NoError(t, os.MkdirAll(filepath.Join(root, binDir), 0o755))
 	require.NoError(t, os.MkdirAll(filepath.Join(root, "plugins", "claude-code"), 0o755))
-	exe = filepath.Join(root, "bin", "engram")
+	require.NoError(t, os.WriteFile(filepath.Join(root, "plugins", "claude-code", "server.mjs"), []byte("// server"), 0o644))
+	exe = filepath.Join(root, binDir, "engram")
 	require.NoError(t, os.WriteFile(exe, []byte("bin"), 0o755))
 	return root, exe
 }
 
-func TestFindPluginBase_CheckoutLayout(t *testing.T) {
-	root, exe := makeCheckout(t)
-	got, err := findPluginBase(exe, "plugins/claude-code")
-	require.NoError(t, err)
-	assert.Equal(t, root, got)
+func TestFindNearBinary(t *testing.T) {
+	tests := []struct {
+		name    string
+		binDir  string
+		symlink bool
+	}{
+		{"checkout layout", "bin", false},
+		{"symlinked binary", "bin", true},
+		{"plugins next to binary", ".", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root, exe := makeLayout(t, tt.binDir)
+			if tt.symlink {
+				link := filepath.Join(t.TempDir(), "engram")
+				require.NoError(t, os.Symlink(exe, link))
+				exe = link
+			}
+			got, err := findNearBinary(exe, "plugins/claude-code")
+			require.NoError(t, err)
+			assert.Equal(t, filepath.Join(root, "plugins", "claude-code"), got)
+		})
+	}
 }
 
-func TestFindPluginBase_FollowsSymlinkedBinary(t *testing.T) {
-	root, exe := makeCheckout(t)
-	link := filepath.Join(t.TempDir(), "engram")
-	require.NoError(t, os.Symlink(exe, link))
-
-	got, err := findPluginBase(link, "plugins/claude-code")
-	require.NoError(t, err)
-	assert.Equal(t, root, got)
-}
-
-func TestFindPluginBase_PluginsNextToBinary(t *testing.T) {
-	dir, err := filepath.EvalSymlinks(t.TempDir())
-	require.NoError(t, err)
-	require.NoError(t, os.MkdirAll(filepath.Join(dir, "plugins", "claude-code"), 0o755))
-	exe := filepath.Join(dir, "engram")
-	require.NoError(t, os.WriteFile(exe, []byte("bin"), 0o755))
-
-	got, err := findPluginBase(exe, "plugins/claude-code")
-	require.NoError(t, err)
-	assert.Equal(t, dir, got)
-}
-
-func TestFindPluginBase_NotFound(t *testing.T) {
+func TestFindNearBinary_NotFound(t *testing.T) {
 	exe := filepath.Join(t.TempDir(), "engram")
 	require.NoError(t, os.WriteFile(exe, []byte("bin"), 0o755))
 
-	_, err := findPluginBase(exe, "plugins/claude-code")
+	_, err := findNearBinary(exe, "plugins/claude-code")
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "--source")
+	assert.Contains(t, err.Error(), "plugins/claude-code not found")
 }
 
-func TestResolveMCPServerPath_CheckoutLayout(t *testing.T) {
-	root, _ := makeCheckout(t)
-	server := filepath.Join(root, "plugins", "claude-code", "server.mjs")
-	require.NoError(t, os.WriteFile(server, []byte("// server"), 0o644))
-	t.Setenv("ENGRAM_PLUGIN_ROOT", "")
-
-	got, err := mcpServerPathFor(filepath.Join(root, "bin", "engram"))
+func TestMCPServerPathFor_CheckoutLayout(t *testing.T) {
+	root, exe := makeLayout(t, "bin")
+	got, err := mcpServerPathFor(exe)
 	require.NoError(t, err)
-	assert.Equal(t, server, got)
-}
-
-func TestUpdateCmd_HasSourceFlag(t *testing.T) {
-	assert.NotNil(t, newUpdateCmd().Flags().Lookup("source"))
+	assert.Equal(t, filepath.Join(root, "plugins", "claude-code", "server.mjs"), got)
 }

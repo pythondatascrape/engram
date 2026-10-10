@@ -34,11 +34,10 @@ Run this after upgrading the engram binary to push new plugin files.`,
 					continue
 				}
 
-				pluginBase, err := resolvePluginBase(sourceDir, pluginDir)
+				src, err := resolvePluginDir(sourceDir, pluginDir)
 				if err != nil {
 					return err
 				}
-				src := filepath.Join(pluginBase, pluginDir)
 
 				switch target.Name {
 				case "claude-code":

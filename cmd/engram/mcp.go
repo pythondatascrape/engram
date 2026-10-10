@@ -49,13 +49,9 @@ func resolveMCPServerPath() (string, error) {
 }
 
 func mcpServerPathFor(exe string) (string, error) {
-	base, err := findPluginBase(exe, filepath.Join("plugins", "claude-code"))
+	p, err := findNearBinary(exe, filepath.Join("plugins", "claude-code", "server.mjs"))
 	if err != nil {
-		return "", fmt.Errorf("server.mjs not found (set ENGRAM_PLUGIN_ROOT to override): %w", err)
-	}
-	p := filepath.Join(base, "plugins", "claude-code", "server.mjs")
-	if _, err := os.Stat(p); err != nil {
-		return "", fmt.Errorf("server.mjs not found at %s (set ENGRAM_PLUGIN_ROOT to override)", p)
+		return "", fmt.Errorf("%w (set ENGRAM_PLUGIN_ROOT to override)", err)
 	}
 	return p, nil
 }

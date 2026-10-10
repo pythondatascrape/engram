@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"runtime"
 	"time"
 
@@ -91,11 +90,10 @@ the engram compression plugin. Use flags to target a specific client.`,
 					continue
 				}
 
-				pluginBase, err := resolvePluginBase(sourceDir, pluginDir)
+				src, err := resolvePluginDir(sourceDir, pluginDir)
 				if err != nil {
 					return err
 				}
-				src := filepath.Join(pluginBase, pluginDir)
 
 				switch target.Name {
 				case "claude-code":
