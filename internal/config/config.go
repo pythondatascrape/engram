@@ -208,7 +208,7 @@ proxy:
     enabled: false
     trigger_tokens: 50000
     keep_tool_uses: 5
-    clear_at_least_tokens: 5000
+    clear_at_least_tokens: 25000
 `
 
 // EnsureDefault creates path with minimal defaults if it does not already exist.
@@ -345,7 +345,7 @@ func defaults() *Config {
 			RedactQueries:  true,
 		},
 		Proxy: ProxyConfig{
-			AnthropicContext: AnthropicContextConfig{TriggerTokens: 50000, KeepToolUses: 5, ClearAtLeastTokens: 5000},
+			AnthropicContext: AnthropicContextConfig{TriggerTokens: 50000, KeepToolUses: 5, ClearAtLeastTokens: 25000},
 			Port:             4242,
 			WindowSize:       8,
 			OpenAIPort:       4243,

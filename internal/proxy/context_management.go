@@ -15,7 +15,8 @@ const contextManagementBeta = "context-management-2025-06-27"
 type Option func(*Handler)
 
 // WithAnthropicContext enables server-side tool-result clearing. It never
-// changes message history or thinking blocks, or client-supplied policies.
+// changes message history or thinking blocks, nor a client's own edits: it
+// appends tool clearing after them unless the client already clears tools.
 func WithAnthropicContext(c config.AnthropicContextConfig) Option {
 	return func(h *Handler) {
 		c.ExcludeTools = append([]string(nil), c.ExcludeTools...)
@@ -38,9 +39,6 @@ func (h *Handler) withContextManagement(r *http.Request, body []byte, model stri
 	if json.Unmarshal(body, &raw) != nil {
 		return body, false
 	}
-	if _, exists := raw["context_management"]; exists {
-		return body, true
-	}
 	edit := map[string]any{
 		"type":    "clear_tool_uses_20250919",
 		"trigger": map[string]any{"type": "input_tokens", "value": c.TriggerTokens},
@@ -52,9 +50,9 @@ func (h *Handler) withContextManagement(r *http.Request, body []byte, model stri
 	if len(c.ExcludeTools) > 0 {
 		edit["exclude_tools"] = c.ExcludeTools
 	}
-	policy, err := json.Marshal(map[string]any{"edits": []any{edit}})
-	if err != nil {
-		return body, false
+	policy, ok := mergeToolClearing(raw["context_management"], edit)
+	if !ok {
+		return body, true
 	}
 	raw["context_management"] = policy
 	encoded, err := json.Marshal(raw)
@@ -80,6 +78,39 @@ func (h *Handler) withContextManagement(r *http.Request, body []byte, model stri
 	return encoded, true
 }
 
+// mergeToolClearing appends edit to the client's policy (Claude Code always
+// sends clear_thinking, which the API requires first). It reports false when
+// the client already clears tool results or sends a policy it cannot read.
+func mergeToolClearing(client json.RawMessage, edit map[string]any) (json.RawMessage, bool) {
+	policy := map[string]json.RawMessage{}
+	var edits []json.RawMessage
+	if client != nil {
+		if json.Unmarshal(client, &policy) != nil || policy == nil {
+			return nil, false
+		}
+		if e, ok := policy["edits"]; ok && json.Unmarshal(e, &edits) != nil {
+			return nil, false
+		}
+		for _, e := range edits {
+			var kind struct {
+				Type string `json:"type"`
+			}
+			if json.Unmarshal(e, &kind) != nil || strings.HasPrefix(kind.Type, "clear_tool_uses") {
+				return nil, false
+			}
+		}
+	}
+	encoded, err := json.Marshal(edit)
+	if err != nil {
+		return nil, false
+	}
+	if policy["edits"], err = json.Marshal(append(edits, encoded)); err != nil {
+		return nil, false
+	}
+	merged, err := json.Marshal(policy)
+	return merged, err == nil
+}
+
 // forwardContextManaged reports only server-confirmed savings. Responses are
 // streamed unchanged; the trailer is available after the response is consumed.
 func (h *Handler) forwardContextManaged(w http.ResponseWriter, r *http.Request, body []byte, system string) {
@@ -102,8 +133,8 @@ func (h *Handler) forwardContextManaged(w http.ResponseWriter, r *http.Request, 
 	if input < 0 {
 		return // No estimates presented as measured savings.
 	}
-	id := r.Header.Get(engramSessionHeader)
-	if id == "" || isPlaceholder(id) {
+	id := requestSessionID(r)
+	if id == "" {
 		id = h.claimPendingSession()
 		if id == "" {
 			id = SessionID(system)

@@ -19,6 +19,27 @@ import (
 const engramSessionHeader = "X-Engram-Session"
 
 // isPlaceholder reports whether s looks like an unresolved shell template variable (e.g. "${session_id}").
+// claudeCodeSessionHeader carries Claude Code's own session id on every request.
+const claudeCodeSessionHeader = "X-Claude-Code-Session-Id"
+
+// requestSessionID is the explicit engram session, else Claude Code's own id
+// when it is safe as a file name, else "" (callers fall back as before).
+func requestSessionID(r *http.Request) string {
+	if id := r.Header.Get(engramSessionHeader); id != "" && !isPlaceholder(id) {
+		return id
+	}
+	id := r.Header.Get(claudeCodeSessionHeader)
+	if id == "" || len(id) > 128 {
+		return ""
+	}
+	for _, c := range id {
+		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '-' || c == '_') {
+			return ""
+		}
+	}
+	return id
+}
+
 func isPlaceholder(s string) bool {
 	return len(s) > 3 && s[0] == '$' && s[1] == '{' && s[len(s)-1] == '}'
 }
@@ -270,8 +291,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Determine session ID. Prefer the UUID registered by the sessionstart hook
 	// (via /internal/register-session). Fall back to the system-prompt fingerprint
 	// when no session was registered (e.g. proxy running without the hook).
-	sessionID := r.Header.Get(engramSessionHeader)
-	if sessionID == "" || isPlaceholder(sessionID) {
+	sessionID := requestSessionID(r)
+	if sessionID == "" {
 		if pending := h.claimPendingSession(); pending != "" {
 			sessionID = pending
 		} else {
@@ -424,9 +445,12 @@ func (h *Handler) doUpstreamRequest(r *http.Request, body []byte, upstream strin
 	// Clone headers, then drop internal/computed ones before forwarding.
 	// X-Engram-Session is an internal routing header not meant for Anthropic.
 	// Content-Length is set explicitly from the (possibly rewritten) body.
+	// Accept-Encoding goes too: the transport then requests gzip and decodes it,
+	// so usage is read from plain JSON/SSE and the client gets it uncompressed.
 	upstreamReq.Header = r.Header.Clone()
 	upstreamReq.Header.Del("Content-Length")
 	upstreamReq.Header.Del(engramSessionHeader)
+	upstreamReq.Header.Del("Accept-Encoding")
 	upstreamReq.ContentLength = int64(len(body))
 	return h.client.Do(upstreamReq)
 }
@@ -540,8 +564,8 @@ func (h *Handler) ServeOpenAI(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) handleOpenAI(w http.ResponseWriter, r *http.Request, rawBody []byte, req openaiRequest) {
-	sessionID := r.Header.Get(engramSessionHeader)
-	if sessionID == "" || isPlaceholder(sessionID) {
+	sessionID := requestSessionID(r)
+	if sessionID == "" {
 		if pending := h.claimPendingSession(); pending != "" {
 			sessionID = pending
 		} else {
@@ -642,8 +666,8 @@ func (h *Handler) handleOpenAI(w http.ResponseWriter, r *http.Request, rawBody [
 }
 
 func (h *Handler) handleOpenAIResponses(w http.ResponseWriter, r *http.Request, rawBody []byte, req openaiResponsesRequest) {
-	sessionID := r.Header.Get(engramSessionHeader)
-	if sessionID == "" || isPlaceholder(sessionID) {
+	sessionID := requestSessionID(r)
+	if sessionID == "" {
 		if pending := h.claimPendingSession(); pending != "" {
 			sessionID = pending
 		} else {

@@ -42,7 +42,7 @@ func TestLoadAnthropicToolClearingDefaults(t *testing.T) {
 	assert.False(t, cfg.Proxy.AnthropicContext.Enabled)
 	assert.Equal(t, 50000, cfg.Proxy.AnthropicContext.TriggerTokens)
 	assert.Equal(t, 5, cfg.Proxy.AnthropicContext.KeepToolUses)
-	assert.Equal(t, 5000, cfg.Proxy.AnthropicContext.ClearAtLeastTokens)
+	assert.Equal(t, 25000, cfg.Proxy.AnthropicContext.ClearAtLeastTokens)
 }
 
 func TestLoadRejectsInvalidAnthropicToolClearing(t *testing.T) {

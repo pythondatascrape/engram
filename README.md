@@ -202,7 +202,7 @@ proxy:
     enabled: true               # opt in; disabled by default
     trigger_tokens: 50000        # start clearing above this input size
     keep_tool_uses: 5            # retain the most recent tool exchanges
-    clear_at_least_tokens: 5000  # avoid small clearings that disrupt caching
+    clear_at_least_tokens: 25000 # avoid small clearings that disrupt caching
     exclude_tools: []           # tool names whose results should be retained
 ```
 
