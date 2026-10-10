@@ -56,7 +56,7 @@ type SecretRotationConfig struct {
 }
 
 type AuthConfig struct {
-	SigningKeyFile  string               `yaml:"signing_key_file"`
+	SigningKeyFile string               `yaml:"signing_key_file"`
 	JWTExpiry      time.Duration        `yaml:"jwt_expiry"`
 	JWTMaxExpiry   time.Duration        `yaml:"jwt_max_expiry"`
 	Registration   RegistrationConfig   `yaml:"registration"`
@@ -117,10 +117,10 @@ type RateLimitingConfig struct {
 }
 
 type ResponseFilteringConfig struct {
-	Enabled                  bool   `yaml:"enabled"`
-	Mode                     string `yaml:"mode"`
-	CheckIdentityLeakage     bool   `yaml:"check_identity_leakage"`
-	CheckSystemPromptExposure bool  `yaml:"check_system_prompt_exposure"`
+	Enabled                   bool   `yaml:"enabled"`
+	Mode                      string `yaml:"mode"`
+	CheckIdentityLeakage      bool   `yaml:"check_identity_leakage"`
+	CheckSystemPromptExposure bool   `yaml:"check_system_prompt_exposure"`
 }
 
 type SecurityConfig struct {
@@ -155,10 +155,21 @@ type LoggingConfig struct {
 }
 
 type ProxyConfig struct {
-	Port           int    `yaml:"port"`
-	WindowSize     int    `yaml:"window_size"`
-	OpenAIPort     int    `yaml:"openai_port"`
-	OpenAIUpstream string `yaml:"openai_upstream"`
+	AnthropicContext AnthropicContextConfig `yaml:"anthropic_context"`
+	Port             int                    `yaml:"port"`
+	WindowSize       int                    `yaml:"window_size"`
+	OpenAIPort       int                    `yaml:"openai_port"`
+	OpenAIUpstream   string                 `yaml:"openai_upstream"`
+}
+
+// AnthropicContextConfig configures server-side clearing of older tool results.
+// Thinking and tool inputs remain intact. Disabled unless explicitly enabled.
+type AnthropicContextConfig struct {
+	Enabled            bool     `yaml:"enabled"`
+	TriggerTokens      int      `yaml:"trigger_tokens"`
+	KeepToolUses       int      `yaml:"keep_tool_uses"`
+	ClearAtLeastTokens int      `yaml:"clear_at_least_tokens"`
+	ExcludeTools       []string `yaml:"exclude_tools"`
 }
 
 // Load reads the YAML file at path, applies defaults, applies env overrides,
@@ -193,6 +204,11 @@ server:
 proxy:
   port: 4242
   window_size: 8
+  anthropic_context:
+    enabled: false
+    trigger_tokens: 50000
+    keep_tool_uses: 5
+    clear_at_least_tokens: 5000
 `
 
 // EnsureDefault creates path with minimal defaults if it does not already exist.
@@ -298,9 +314,9 @@ func defaults() *Config {
 				AlertThreshold: 5,
 			},
 			ResponseFiltering: ResponseFilteringConfig{
-				Enabled:                  true,
-				Mode:                     "strict",
-				CheckIdentityLeakage:     true,
+				Enabled:                   true,
+				Mode:                      "strict",
+				CheckIdentityLeakage:      true,
 				CheckSystemPromptExposure: true,
 			},
 		},
@@ -329,10 +345,11 @@ func defaults() *Config {
 			RedactQueries:  true,
 		},
 		Proxy: ProxyConfig{
-			Port:           4242,
-			WindowSize:     8,
-			OpenAIPort:     4243,
-			OpenAIUpstream: "https://api.openai.com",
+			AnthropicContext: AnthropicContextConfig{TriggerTokens: 50000, KeepToolUses: 5, ClearAtLeastTokens: 5000},
+			Port:             4242,
+			WindowSize:       8,
+			OpenAIPort:       4243,
+			OpenAIUpstream:   "https://api.openai.com",
 		},
 	}
 }
@@ -360,6 +377,9 @@ const DefaultOpenAIProxyPort = 4243
 const minMemoryCeilingBytes = 128 * 1024 * 1024 // 128 MB
 
 func validate(cfg *Config) error {
+	if c := cfg.Proxy.AnthropicContext; c.Enabled && (c.TriggerTokens <= 0 || c.KeepToolUses < 0 || c.ClearAtLeastTokens < 0) {
+		return fmt.Errorf("config: proxy.anthropic_context requires positive trigger_tokens and non-negative keep_tool_uses and clear_at_least_tokens")
+	}
 	if cfg.Server.Port < 1 || cfg.Server.Port > 65535 {
 		return fmt.Errorf("config: port %d is invalid; must be 1-65535", cfg.Server.Port)
 	}

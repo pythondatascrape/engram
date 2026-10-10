@@ -60,6 +60,25 @@ engram install --claude-code
 
 ### What `engram install --claude-code` does
 
+The Anthropic provider supports `claude-opus-5-5`, `claude-sonnet-5-5`, and
+`claude-haiku-5-5`, alongside the older model IDs. The transparent proxy forwards
+the model selected by your client without substitution.
+
+For older Anthropic models, Engram compresses only plain text conversation history.
+Requests containing tool calls, tool results, thinking, images, or other non-text
+blocks pass through unchanged. This preserves parallel tool-call pairing and
+signed thinking context. Claude 5.5 history is preserved from the first request,
+including text-only turns, so later thinking can reuse its original prefix.
+Optional server-side tool-result clearing restores
+token savings for Claude 5.5 without rewriting this history; see Configuration
+below. Streaming response bodies and API errors pass through.
+
+Use current client settings for Claude 5.5. In particular, Opus 5.5 rejects
+disabled/manual thinking and forced tool choice (`any` or `tool`); use adaptive
+thinking and `auto` or `none`. Engram preserves these settings rather than
+silently changing their meaning. See the
+[Anthropic migration guide](https://platform.claude.com/docs/en/models/opus-5-5/migration-guide).
+
 Starting in v0.3.0, a single install command handles everything:
 
 1. Copies the Engram plugin into `~/.claude/plugins/`
@@ -179,9 +198,38 @@ proxy:
   port: 4242          # HTTP proxy port (Claude Code routes through this)
   openai_port: 4243   # OpenAI-compatible proxy port (optional, 0 = disabled)
   window_size: 8      # default: keep the last 8 messages verbatim, summarize older history
+  anthropic_context:
+    enabled: true               # opt in; disabled by default
+    trigger_tokens: 50000        # start clearing above this input size
+    keep_tool_uses: 5            # retain the most recent tool exchanges
+    clear_at_least_tokens: 5000  # avoid small clearings that disrupt caching
+    exclude_tools: []           # tool names whose results should be retained
 ```
 
 Run `engram serve --help` for the full list of options.
+
+Restart the daemon after changing the configuration. `anthropic_context` applies
+to requests for `claude-opus-5-5`,
+`claude-sonnet-5-5`, and `claude-haiku-5-5`. Engram adds Anthropic's context
+management beta and asks the API to clear older tool results. All thinking and
+tool inputs remain intact. Existing client `context_management` settings take
+precedence and their history is never locally compressed. Unknown models and
+disabled configurations retain the existing pass-through behavior.
+
+`trigger_tokens` must be positive; `keep_tool_uses` and
+`clear_at_least_tokens` must be non-negative. Zero `clear_at_least_tokens` omits
+the minimum-clear requirement. Tool clearing can invalidate prompt caches, so
+cleared tokens do not directly translate to a guaranteed dollar saving. See
+[Anthropic context editing](https://platform.claude.com/docs/en/build-with-claude/context-editing).
+
+For managed requests, Engram records server-reported cleared tokens in session
+total savings, including JSON and streaming responses. Cached input tokens are
+included in total input accounting; identity/context breakdowns are unavailable
+on this path. The HTTP trailer `X-Engram-Cleared-Input-Tokens`, available after
+reading the response, also reports the cleared-token count. Without reported
+edits this count is zero; missing usage is not estimated as measured savings.
+The full conversation still travels to Anthropic, so these savings reduce model
+input context rather than request upload size.
 
 ## OpenAI-Compatible Proxy
 

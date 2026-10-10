@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+
+	"github.com/pythondatascrape/engram/internal/config"
 )
 
 // engramSessionHeader is the request header used to pass the session ID from
@@ -23,11 +25,12 @@ func isPlaceholder(s string) bool {
 
 // Handler implements http.Handler for the Anthropic-compatible proxy.
 type Handler struct {
-	windowSize     int
-	sessionsDir    string
-	upstream       string // e.g. "https://api.anthropic.com"
-	openaiUpstream string // e.g. "https://api.openai.com"
-	client         *http.Client
+	anthropicContext config.AnthropicContextConfig
+	windowSize       int
+	sessionsDir      string
+	upstream         string // e.g. "https://api.anthropic.com"
+	openaiUpstream   string // e.g. "https://api.openai.com"
+	client           *http.Client
 	// afterStats is called after each WriteStats completes. Used in tests to
 	// avoid time.Sleep races; nil in production.
 	afterStats func()
@@ -43,14 +46,18 @@ type Handler struct {
 }
 
 // NewHandler creates a new Handler.
-func NewHandler(windowSize int, sessionsDir, upstream, openaiUpstream string) *Handler {
-	return &Handler{
+func NewHandler(windowSize int, sessionsDir, upstream, openaiUpstream string, opts ...Option) *Handler {
+	h := &Handler{
 		windowSize:     windowSize,
 		sessionsDir:    sessionsDir,
 		upstream:       upstream,
 		openaiUpstream: openaiUpstream,
 		client:         &http.Client{},
 	}
+	for _, opt := range opts {
+		opt(h)
+	}
+	return h
 }
 
 // registerSession stores id as the pending session ID for the next /v1/messages
@@ -77,11 +84,12 @@ func (h *Handler) claimPendingSession() string {
 
 // anthropicRequest is the subset of the Anthropic messages request we care about.
 type anthropicRequest struct {
-	Model     string             `json:"model"`
-	Messages  []AnthropicMessage `json:"messages"`
-	RawSystem json.RawMessage    `json:"system"`
-	System    string             `json:"-"` // extracted text from RawSystem
-	Stream    bool               `json:"stream"`
+	ContextManagement json.RawMessage    `json:"context_management"`
+	Model             string             `json:"model"`
+	Messages          []AnthropicMessage `json:"messages"`
+	RawSystem         json.RawMessage    `json:"system"`
+	System            string             `json:"-"` // extracted text from RawSystem
+	Stream            bool               `json:"stream"`
 }
 
 // extractSystem populates the System string field from RawSystem, handling
@@ -236,6 +244,22 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	req.extractSystem()
 
+	// Tool exchanges and signed thinking depend on the original conversation.
+	// Summarising a prefix can orphan parallel tool results or invalidate thinking
+	// signatures. Fail open for protocol content, including future block types,
+	// and preserve the complete wire body rather than rebuilding messages. Claude
+	// 5.5 prefixes must stay intact even before the first thinking response.
+	claude55 := req.Model == "claude-opus-5-5" || req.Model == "claude-sonnet-5-5" || req.Model == "claude-haiku-5-5"
+	if claude55 || hasAnthropicProtocolContent(req.Messages) || req.ContextManagement != nil {
+		body, managed := h.withContextManagement(r, rawBody, req.Model)
+		if managed {
+			h.forwardContextManaged(w, r, body, req.System)
+		} else {
+			h.forwardVerbatim(w, r, body, h.upstream)
+		}
+		return
+	}
+
 	slog.Info("proxy: intercepted /v1/messages",
 		"num_messages", len(req.Messages),
 		"system_len", len(req.System),
@@ -355,6 +379,26 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			h.afterStats()
 		}
 	}()
+}
+
+// hasAnthropicProtocolContent permits compression only for plain text history.
+// Unknown shapes are passed through so new API features remain compatible.
+func hasAnthropicProtocolContent(messages []AnthropicMessage) bool {
+	for _, message := range messages {
+		switch content := message.Content.(type) {
+		case string:
+		case []any:
+			for _, block := range content {
+				fields, ok := block.(map[string]any)
+				if !ok || fields["type"] != "text" {
+					return true
+				}
+			}
+		default:
+			return true
+		}
+	}
+	return false
 }
 
 // forwardVerbatim forwards the request with the given body (or the original body if nil).

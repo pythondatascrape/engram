@@ -21,8 +21,8 @@ type Server struct {
 // upstream is the real Anthropic API base URL.
 // openaiUpstream is the OpenAI API base URL (e.g. https://api.openai.com).
 // If openaiPort <= 0, the OpenAI listener is disabled.
-func New(port, windowSize int, sessionsDir, upstream string, openaiPort int, openaiUpstream string) *Server {
-	handler := NewHandler(windowSize, sessionsDir, upstream, openaiUpstream)
+func New(port, windowSize int, sessionsDir, upstream string, openaiPort int, openaiUpstream string, opts ...Option) *Server {
+	handler := NewHandler(windowSize, sessionsDir, upstream, openaiUpstream, opts...)
 	s := &Server{
 		srv: &http.Server{
 			Addr:    fmt.Sprintf(":%d", port),

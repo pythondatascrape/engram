@@ -15,9 +15,9 @@ import (
 )
 
 const (
-	defaultBaseURL        = "https://api.anthropic.com"
-	anthropicVersion      = "2023-06-01"
-	defaultMaxTokens      = 4096
+	defaultBaseURL   = "https://api.anthropic.com"
+	anthropicVersion = "2023-06-01"
+	defaultMaxTokens = 4096
 )
 
 // Option configures the Provider.
@@ -73,11 +73,14 @@ func (p *Provider) Name() string {
 func (p *Provider) Capabilities() provider.Capabilities {
 	return provider.Capabilities{
 		Models: []string{
+			"claude-opus-5-5",
+			"claude-sonnet-5-5",
+			"claude-haiku-5-5",
 			"claude-opus-4-6",
 			"claude-sonnet-4-6",
 			"claude-haiku-4-5-20251001",
 		},
-		MaxContextWindow: 200000,
+		MaxContextWindow:  1000000,
 		SupportsStreaming: true,
 	}
 }
@@ -115,9 +118,9 @@ type anthropicRequest struct {
 }
 
 type sseEvent struct {
-	Type  string          `json:"type"`
-	Delta *sseDelta       `json:"delta,omitempty"`
-	Index int             `json:"index,omitempty"`
+	Type  string    `json:"type"`
+	Delta *sseDelta `json:"delta,omitempty"`
+	Index int       `json:"index,omitempty"`
 }
 
 type sseDelta struct {
@@ -188,7 +191,7 @@ func (p *Provider) Send(ctx context.Context, req *provider.Request) (<-chan prov
 				switch eventType {
 				case "content_block_delta":
 					var ev sseEvent
-					if err := json.Unmarshal([]byte(data), &ev); err == nil && ev.Delta != nil {
+					if err := json.Unmarshal([]byte(data), &ev); err == nil && ev.Delta != nil && ev.Delta.Type == "text_delta" {
 						select {
 						case ch <- provider.Chunk{Text: ev.Delta.Text, Index: ev.Index}:
 						case <-ctx.Done():

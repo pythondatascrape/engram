@@ -34,7 +34,10 @@ func TestAnthropicCapabilities(t *testing.T) {
 
 	assert.True(t, caps.SupportsStreaming)
 	assert.NotEmpty(t, caps.Models)
-	assert.Equal(t, 200000, caps.MaxContextWindow)
+	assert.Equal(t, 1000000, caps.MaxContextWindow)
+	for _, model := range []string{"claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"} {
+		assert.Contains(t, caps.Models, model)
+	}
 }
 
 func TestAnthropicSend(t *testing.T) {
@@ -45,6 +48,7 @@ func TestAnthropicSend(t *testing.T) {
 
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"thinking_delta\",\"text\":\"must not become response text\",\"thinking\":\"reasoning\"}}\n\n")
 		fmt.Fprint(w, sseBody([]string{"Hello", ", ", "world"}))
 	}))
 	defer srv.Close()

@@ -106,6 +106,9 @@ func TestGenerateSystemdUnit_NonEmptySocket(t *testing.T) {
 func TestInstallCmd_ClaudeCode_WritesStatusLine(t *testing.T) {
 	fakeHome := t.TempDir()
 	t.Setenv("HOME", fakeHome)
+	// HOME isolates files, but launchctl/systemctl still manage the real user's
+	// services. Keep service managers unavailable in this registration test.
+	t.Setenv("PATH", t.TempDir())
 
 	fakeBase := t.TempDir()
 	pluginSrc := filepath.Join(fakeBase, "plugins", "claude-code")
@@ -123,8 +126,8 @@ func TestInstallCmd_ClaudeCode_WritesStatusLine(t *testing.T) {
 	rootCmd.SetErr(&buf)
 
 	rootCmd.SetArgs([]string{"install", "--claude-code", "--source", fakeBase})
-	// Command will fail due to readiness check (no actual daemon), but that's ok for this test.
-	// We're testing that statusline gets registered before the readiness check happens.
+	// Service installation fails because no service manager is available.
+	// Statusline registration happens first and is the behavior under test.
 	rootCmd.Execute()
 
 	settingsPath := filepath.Join(fakeHome, ".claude", "settings.json")

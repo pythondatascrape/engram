@@ -1,8 +1,9 @@
-.PHONY: all build start stop restart test test-all install clean lint
+.PHONY: all build start stop restart test test-all install dev-install uninstall reinstall clean lint
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -ldflags "-X main.Version=$(VERSION)"
 CONFIG  ?= engram.yaml
+LINK_DIR ?= $(HOME)/.local/bin
 
 all: build start
 
@@ -35,6 +36,19 @@ test-go-sdk:
 
 install: build
 	@./bin/engram serve --install-daemon --config $(abspath $(CONFIG))
+
+# Install from this checkout for Claude Code: the daemon runs bin/engram and
+# `engram` on PATH is a symlink to it, so a rebuild is picked up on reinstall.
+dev-install: build
+	@mkdir -p $(LINK_DIR)
+	ln -sf $(CURDIR)/bin/engram $(LINK_DIR)/engram
+	./bin/engram install --claude-code --source $(CURDIR)
+
+uninstall:
+	@if [ -x ./bin/engram ]; then ./bin/engram uninstall; else engram uninstall; fi
+	@if [ -L $(LINK_DIR)/engram ]; then rm $(LINK_DIR)/engram && echo "Removed $(LINK_DIR)/engram"; fi
+
+reinstall: uninstall dev-install
 
 clean:
 	rm -rf bin/ dist/

@@ -19,6 +19,41 @@ func writeTempYAML(t *testing.T, content string) string {
 	return path
 }
 
+func TestLoadAnthropicToolClearing(t *testing.T) {
+	cfg, err := config.Load(writeTempYAML(t, `proxy:
+  anthropic_context:
+    enabled: true
+    trigger_tokens: 60000
+    keep_tool_uses: 6
+    clear_at_least_tokens: 10000
+    exclude_tools: [memory]
+`))
+	require.NoError(t, err)
+	assert.True(t, cfg.Proxy.AnthropicContext.Enabled)
+	assert.Equal(t, 60000, cfg.Proxy.AnthropicContext.TriggerTokens)
+	assert.Equal(t, 6, cfg.Proxy.AnthropicContext.KeepToolUses)
+	assert.Equal(t, 10000, cfg.Proxy.AnthropicContext.ClearAtLeastTokens)
+	assert.Equal(t, []string{"memory"}, cfg.Proxy.AnthropicContext.ExcludeTools)
+}
+
+func TestLoadAnthropicToolClearingDefaults(t *testing.T) {
+	cfg, err := config.Load(writeTempYAML(t, "{}"))
+	require.NoError(t, err)
+	assert.False(t, cfg.Proxy.AnthropicContext.Enabled)
+	assert.Equal(t, 50000, cfg.Proxy.AnthropicContext.TriggerTokens)
+	assert.Equal(t, 5, cfg.Proxy.AnthropicContext.KeepToolUses)
+	assert.Equal(t, 5000, cfg.Proxy.AnthropicContext.ClearAtLeastTokens)
+}
+
+func TestLoadRejectsInvalidAnthropicToolClearing(t *testing.T) {
+	for _, setting := range []string{"trigger_tokens: 0", "keep_tool_uses: -1", "clear_at_least_tokens: -1"} {
+		t.Run(setting, func(t *testing.T) {
+			_, err := config.Load(writeTempYAML(t, "proxy:\n  anthropic_context:\n    enabled: true\n    "+setting+"\n"))
+			require.ErrorContains(t, err, "anthropic_context")
+		})
+	}
+}
+
 func TestLoad_MinimalYAML_AppliesDefaults(t *testing.T) {
 	path := writeTempYAML(t, `
 server:
