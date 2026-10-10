@@ -77,3 +77,26 @@ func TestListener_SocketPath(t *testing.T) {
 	defer l.Close()
 	assert.Equal(t, sockPath, l.SocketPath())
 }
+
+func TestListener_RefusesLiveSocket(t *testing.T) {
+	sockPath := shortSock(t, "l.sock")
+	first, err := NewListener(sockPath)
+	require.NoError(t, err)
+	defer first.Close()
+	go func() {
+		for {
+			conn, err := first.Accept()
+			if err != nil {
+				return
+			}
+			conn.Close()
+		}
+	}()
+
+	_, err = NewListener(sockPath)
+	require.ErrorIs(t, err, ErrAlreadyRunning)
+
+	conn, err := net.DialTimeout("unix", sockPath, time.Second)
+	require.NoError(t, err, "the running daemon's socket must stay reachable")
+	conn.Close()
+}

@@ -169,6 +169,8 @@ func runServe(cmd *cobra.Command, args []string) error {
 	sessionsDir := DefaultSessionsDir()
 	proxySrv := proxy.New(cfg.Proxy.Port, cfg.Proxy.WindowSize, sessionsDir, "https://api.anthropic.com", cfg.Proxy.OpenAIPort, cfg.Proxy.OpenAIUpstream, proxy.WithAnthropicContext(cfg.Proxy.AnthropicContext))
 	if err := proxySrv.Start(); err != nil {
+		// Close the daemon listener so a failed start doesn't leave a dead socket behind.
+		srv.Stop()
 		return fmt.Errorf("start proxy on :%d: %w", cfg.Proxy.Port, err)
 	}
 	slog.Info("proxy listening", "port", cfg.Proxy.Port)
